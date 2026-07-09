@@ -1,0 +1,59 @@
+{
+    "author": "Legend of Pebble",
+    "dependencies": {},
+    "keywords": [],
+    "name": "legend-of-pebble",
+    "pebble": {
+        "displayName": "Legend of Pebble",
+        "enableMultiJS": true,
+        "messageKeys": [],
+        "projectType": "native",
+        "resources": {
+            "media": [
+                {
+                    "file": "images/boxy_bold.png",
+                    "name": "BITFONT",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/Atlas.png",
+                    "name": "ATLAS",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/interface.png",
+                    "name": "ICONS",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monsters.png",
+                    "name": "MONSTERS",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "emery",
+            "gabbro"
+        ],
+        "uuid": "1a1b1ae6-435e-4556-a208-1a4e0ac91586",
+        "watchapp": {
+            "watchface": false
+        }
+    },
+    "version": "1.2.1"
+}
