@@ -121,11 +121,12 @@ static const EnemyDef s_enemies[ENEMY_COUNT] = {
         .gold_min    = 2, .gold_max = 5,
         .sprite_slot = 0,
     },
-    // ENEMY_WARDEN (boss) — L5 mid-boss; shield is one-hit absorb (Purge optional)
+    // ENEMY_WARDEN (boss) — L5 mid-boss; shield is one-hit absorb (Purge optional).
+    // Tuned via Monte-Carlo: ~77% win under-geared, ~95% with Dagger+Cloak.
     {
         .name        = "THE KEEPER",
-        .hp          = 28,
-        .atk_min     = 4, .atk_max = 9,
+        .hp          = 32,
+        .atk_min     = 5, .atk_max = 10,
         .category    = ENEMY_CAT_DEMON,
         .powers      = { ENEMY_POWER_ATTACK, ENEMY_POWER_SCORCH, ENEMY_POWER_SHIELD },
         .power_count = 3,
@@ -187,11 +188,13 @@ static const EnemyDef s_enemies[ENEMY_COUNT] = {
         .gold_min    = 10, .gold_max = 20,
         .sprite_slot = 8,
     },
-    // ENEMY_LICH (final boss) — floor 10; tuned for Dagger/Cloak + Purge clears
+    // ENEMY_LICH (final boss) — floor 10.
+    // Tuned via Monte-Carlo: ~80% win with Dagger/Vest/Purge, ~90% with chest
+    // bonuses, ~99% fully geared. Shield is a one-hit absorb so never a wall.
     {
         .name        = "THE ARCHITECT",
-        .hp          = 40,
-        .atk_min     = 6, .atk_max = 12,
+        .hp          = 55,
+        .atk_min     = 7, .atk_max = 14,
         .category    = ENEMY_CAT_UNDEAD,
         .powers      = { ENEMY_POWER_ATTACK, ENEMY_POWER_SCORCH, ENEMY_POWER_MPDRAIN, ENEMY_POWER_SHIELD },
         .power_count = 4,
@@ -206,6 +209,8 @@ static Layer      *s_canvas_ref = NULL;
 
 extern GBitmap *s_monsters;
 extern GBitmap *s_icon_atlas;
+void monster_bitmap_load(int slot);   // main.c — loads one 58x63 slice
+void monster_bitmap_unload(void);
 
 #define ENEMY_SPRITE_W      58
 #define ENEMY_SPRITE_H      63
@@ -225,7 +230,9 @@ static bool s_show_result = false;
 
 #define CMD_ICON_SIZE   16
 #define CMD_ICON_SCALE   3
-#define CMD_ICON_DRAW   (CMD_ICON_SIZE * CMD_ICON_SCALE)
+// On-screen icon size: ~15% smaller than the old 16*3=48px integer blit.
+// draw_combat_icon nearest-neighbor scales to this, so any size works.
+#define CMD_ICON_DRAW   41
 #define CMD_ICON_PAD     6
 #define CMD_FONT_HEIGHT     24
 
@@ -241,6 +248,9 @@ static int  s_shield_uses   = 0;
 
 // DOWN action: 0 = spell (if known), 1 = potion. SELECT cycles when both available.
 static int s_down_mode = 0;
+
+// First-combat intro hint (session only).
+static bool s_hint_shown = false;
 
 // ---- Helpers ----
 static int rng_range(int lo, int hi) {
@@ -406,22 +416,8 @@ static void enemy_show_result(void *context) {
     
     EnemyPower power = (EnemyPower)(intptr_t)context;
     const EnemyDef *def = &s_enemies[s_combat.enemy_id];
-    int miss_roll = rng_range(0, 99);
-    
-    if (miss_roll < 30) {
-        snprintf(s_current_result, sizeof(s_current_result), "MISS!");
-        s_show_result = true;
-        if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
-        
-        // Back to player turn
-        s_combat.phase_timer = app_timer_register(1200, phase_tick,
-            (void*)(intptr_t)COMBAT_PHASE_INPUT);
-        return;
-    }
-    
-    int dmg = 0;
-    bool crit = (rng_range(0,99) < 5);
 
+    // Signal Shield never "misses" — resolve before the miss roll.
     if (power == ENEMY_POWER_SHIELD) {
         if (!s_shield_active && s_shield_uses < SHIELD_MAX_USES) {
             s_shield_active = true;
@@ -430,7 +426,7 @@ static void enemy_show_result(void *context) {
             snprintf(s_current_result, sizeof(s_current_result), "+DEF UP");
         } else {
             // Already shielded or out of uses — fall back to attack
-            dmg = rng_range(def->atk_min, def->atk_max);
+            int dmg = rng_range(def->atk_min, def->atk_max);
             player_take_damage(dmg);
             event_start_shake(6, 3);
             snprintf(s_current_action, sizeof(s_current_action), "HIT!");
@@ -448,6 +444,22 @@ static void enemy_show_result(void *context) {
             (void*)(intptr_t)COMBAT_PHASE_INPUT);
         return;
     }
+
+    int miss_roll = rng_range(0, 99);
+    
+    if (miss_roll < 30) {
+        snprintf(s_current_result, sizeof(s_current_result), "MISS!");
+        s_show_result = true;
+        if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
+        
+        // Back to player turn
+        s_combat.phase_timer = app_timer_register(1200, phase_tick,
+            (void*)(intptr_t)COMBAT_PHASE_INPUT);
+        return;
+    }
+    
+    int dmg = 0;
+    bool crit = (rng_range(0,99) < 5);
 
     if (power == ENEMY_POWER_MPDRAIN) {
         if (g_player.mp > 0) {
@@ -522,6 +534,7 @@ void combat_init(Layer *canvas) {
 }
 
 void combat_start(EnemyId enemy_id, int8_t victory_event, bool can_run) {
+    monster_bitmap_load(s_enemies[enemy_id].sprite_slot);
     s_combat.enemy_id      = enemy_id;
     s_combat.enemy_hp      = s_enemies[enemy_id].hp;
     s_combat.victory_event = victory_event;
@@ -534,6 +547,15 @@ void combat_start(EnemyId enemy_id, int8_t victory_event, bool can_run) {
     magic_reset_selection();
 
     clear_messages();
+    // First fight of the session: show control hint in the bottom bar
+    // during INTRO (icons appear once INPUT starts).
+    if (!s_hint_shown) {
+        snprintf(s_current_action, sizeof(s_current_action), "UP:ATK");
+        snprintf(s_current_result, sizeof(s_current_result),
+                 can_run ? "BK:RUN DN:ITEM" : "DN:ITEM");
+        s_show_result = true;
+        s_hint_shown = true;
+    }
     
     if (s_combat.phase_timer) {
         app_timer_cancel(s_combat.phase_timer);
@@ -542,6 +564,10 @@ void combat_start(EnemyId enemy_id, int8_t victory_event, bool can_run) {
         (void*)(intptr_t)COMBAT_PHASE_INPUT);
 
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
+}
+
+bool combat_can_run(void) {
+    return s_can_run;
 }
 
 bool combat_is_active(void) {
@@ -558,6 +584,7 @@ void combat_dismiss(void) {
         s_combat.phase_timer = NULL;
     }
     clear_messages();
+    monster_bitmap_unload();
     s_combat.phase    = COMBAT_PHASE_IDLE;
     s_combat.enemy_hp = 0;
     s_enemy_shake_x   = 0;
@@ -770,12 +797,18 @@ static void spell_show_result(void *context) {
 
     if (!ok) {
         snprintf(s_current_action, sizeof(s_current_action), "FAILED!");
+        snprintf(s_current_result, sizeof(s_current_result), "%.23s", g_magic_msg);
+        s_show_result = true;
+        if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
+        // Failed cast (no MP / full HP / no spell) does not spend the turn.
+        s_combat.phase_timer = app_timer_register(800, phase_tick,
+            (void*)(intptr_t)COMBAT_PHASE_INPUT);
+        return;
     }
     snprintf(s_current_result, sizeof(s_current_result), "%.23s", g_magic_msg);
     s_show_result = true;
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 
-    // Failed cast (no MP / no spell) still spends the turn.
     s_combat.phase_timer = app_timer_register(800, show_action_result, NULL);
 }
 
@@ -824,8 +857,8 @@ EnemyCategory combat_enemy_category(void) {
 static void draw_enemy_sprite(GBitmap *fb, int dest_x, int dest_y) {
     if (!s_monsters) return;
 
-    const EnemyDef *def = &s_enemies[s_combat.enemy_id];
-    int sprite_x = def->sprite_slot * ENEMY_SPRITE_W;
+    // s_monsters holds just this enemy's slice, so the sprite starts at x=0.
+    int sprite_x = 0;
 
     uint8_t *data    = gbitmap_get_data(s_monsters);
     int      stride  = gbitmap_get_bytes_per_row(s_monsters);
@@ -868,25 +901,23 @@ static void draw_combat_icon(GBitmap *fb, int icon_slot, int dest_x, int dest_y)
 
     int src_x = icon_slot * CMD_ICON_SIZE;
 
-    for (int row = 0; row < CMD_ICON_SIZE; row++) {
-        for (int dy = 0; dy < CMD_ICON_SCALE; dy++) {
-            int fb_y = dest_y + row * CMD_ICON_SCALE + dy;
-            if (fb_y < 0 || fb_y >= fb_bounds.size.h) continue;
-            GBitmapDataRowInfo info = gbitmap_get_data_row_info(fb, fb_y);
+    // Nearest-neighbor scale 16px source -> CMD_ICON_DRAW px on screen.
+    for (int y = 0; y < CMD_ICON_DRAW; y++) {
+        int row  = y * CMD_ICON_SIZE / CMD_ICON_DRAW;
+        int fb_y = dest_y + y;
+        if (fb_y < 0 || fb_y >= fb_bounds.size.h) continue;
+        GBitmapDataRowInfo info = gbitmap_get_data_row_info(fb, fb_y);
 
-            for (int col = 0; col < CMD_ICON_SIZE; col++) {
-                int map_x = src_x + col;
-                uint8_t byte  = data[row * stride + (map_x / 2)];
-                uint8_t index = (map_x % 2 == 0) ? (byte >> 4) & 0x0F : byte & 0x0F;
-                GColor col_px = palette[index];
-                if (!col_px.a) continue;
+        for (int x = 0; x < CMD_ICON_DRAW; x++) {
+            int map_x = src_x + (x * CMD_ICON_SIZE / CMD_ICON_DRAW);
+            uint8_t byte  = data[row * stride + (map_x / 2)];
+            uint8_t index = (map_x % 2 == 0) ? (byte >> 4) & 0x0F : byte & 0x0F;
+            GColor col_px = palette[index];
+            if (!col_px.a) continue;
 
-                for (int dx = 0; dx < CMD_ICON_SCALE; dx++) {
-                    int fb_x = dest_x + col * CMD_ICON_SCALE + dx;
-                    if (fb_x >= info.min_x && fb_x <= info.max_x)
-                        info.data[fb_x] = col_px.argb;
-                }
-            }
+            int fb_x = dest_x + x;
+            if (fb_x >= info.min_x && fb_x <= info.max_x)
+                info.data[fb_x] = col_px.argb;
         }
     }
 }
@@ -979,38 +1010,47 @@ void combat_draw(GBitmap *fb) {
         return;
     }
 
-    // Enemy Sprite Draw
-    int sprite_x = (cx/2*3) - (ENEMY_DRAW_W / 2);
+    // Enemy Sprite Draw — centered on screen
+    int sprite_x = cx - (ENEMY_DRAW_W / 2);
     int sprite_y = cy - ENEMY_DRAW_H / 2;
     draw_enemy_sprite(fb, sprite_x, sprite_y);
 
-    // Enemy name (+ shield pip)
-    if (s_shield_active) {
-        bitfont_render(fb, "SHIELDED", cx, cy - 114 + CMD_FONT_HEIGHT, JUSTIFY_CENTER);
-    } else {
-        bitfont_render(fb, def->name, cx, cy - 114 + CMD_FONT_HEIGHT, JUSTIFY_CENTER);
+    // Enemy name (+ shield pip) — scale 2, flush with the top edge, with its
+    // HP right underneath so the player can see how much is left to kill.
+    int name_y = 3;
+    bitfont_render_scaled(fb, s_shield_active ? "SHIELDED" : def->name,
+                          cx, name_y, JUSTIFY_CENTERV, 2);
+    {
+        static char ehp_buf[16];
+        snprintf(ehp_buf, sizeof(ehp_buf), "HP %d/%d",
+                 (int)s_combat.enemy_hp, (int)def->hp);
+        bitfont_render_scaled(fb, ehp_buf, cx, name_y + 18,
+                              JUSTIFY_CENTERV, 2);
     }
     
-    // Current action/result
-    int rx = cx-90; 
-    int ry = cy-114+CMD_FONT_HEIGHT;
-    if (s_current_action[0]) {
-        bitfont_render(fb, s_current_action, rx, ry+CMD_FONT_HEIGHT*2+CMD_ICON_SCALE*4, JUSTIFY_LEFT);
-    }
-    if (s_show_result && s_current_result[0]) {
-        bitfont_render(fb, s_current_result, rx, ry+CMD_FONT_HEIGHT*3+CMD_ICON_SCALE*5, JUSTIFY_LEFT);
+    // Action/result message bar — bottom strip where the command icons sit.
+    // The icons only draw during INPUT, so outside that phase the strip is
+    // free and the text never covers the enemy sprite. During INPUT the
+    // icons themselves signal "your turn", so no text is needed.
+    if (s_combat.phase != COMBAT_PHASE_INPUT) {
+        int msg_y = fb_bounds.size.h - 2 * 18 - 4;
+        if (s_current_action[0]) {
+            bitfont_render_scaled(fb, s_current_action, cx, msg_y,
+                                  JUSTIFY_CENTERV, 2);
+        }
+        if (s_show_result && s_current_result[0]) {
+            bitfont_render_scaled(fb, s_current_result, cx, msg_y + 18,
+                                  JUSTIFY_CENTERV, 2);
+        }
     }
 
-    // Player HP / MP
+    // Player HP / MP — scale 2 so the two blocks never collide mid-screen
     static char php_buf[20];
+    int stat_y = cy + 114 + CMD_ICON_PAD*2 - CMD_FONT_HEIGHT*2 - CMD_ICON_DRAW - CMD_ICON_SCALE + 4;
     snprintf(php_buf, sizeof(php_buf), "HP %d/%d", g_player.hp, g_player.max_hp);
-    bitfont_render(fb, php_buf, cx - 90,
-                   cy + 114 + CMD_ICON_PAD*2 - CMD_FONT_HEIGHT*2 - CMD_ICON_DRAW - CMD_ICON_SCALE,
-                   JUSTIFY_LEFT);
+    bitfont_render_scaled(fb, php_buf, cx - 94, stat_y, JUSTIFY_LEFT, 2);
     snprintf(php_buf, sizeof(php_buf), "MP %d/%d", g_player.mp, g_player.max_mp);
-    bitfont_render(fb, php_buf, cx + 90,
-                   cy + 114 + CMD_ICON_PAD*2 - CMD_FONT_HEIGHT*2 - CMD_ICON_DRAW - CMD_ICON_SCALE,
-                   JUSTIFY_RIGHT);
+    bitfont_render_scaled(fb, php_buf, cx + 94, stat_y, JUSTIFY_RIGHT, 2);
 
     // Controls — SELECT cycles spell↔potion when both available
     if (s_combat.phase == COMBAT_PHASE_INPUT) {

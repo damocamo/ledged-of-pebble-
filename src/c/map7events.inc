@@ -20,27 +20,37 @@ static const EventCmd s_m7_ev0_cmds[] = {
 };
 static const EventCmd s_m7_ev1_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "DESCENDING...", 20 } },
-    { .type=CMD_CHANGE_MAP, .change_map={ 7, 1, 1, 1 } },
+    { .type=CMD_CHANGE_MAP, .change_map={ 7, 1, 1, 2 } },
 };
 static const EventCmd s_m7_ev2_cmds[] = {
-    { .type=CMD_FLAG_CHECK, .flag_check={ 12, -1 } },
-    { .type=CMD_FLAG_CHANGE, .flag_change={ 12, true } },
+    { .type=CMD_FLAG_CHECK, .flag_check={ 11, -1 } },
+    { .type=CMD_FLAG_CHANGE, .flag_change={ 11, true } },
     { .type=CMD_SET_SPELLBOOK, .set_spellbook={ 2 } },
     { .type=CMD_DISPLAY_ICON, .display_icon={ 12, 25 } },
     { .type=CMD_DISPLAY_MESSAGE, .message={ "SPELLBOOK:\nPURGE", 30 } },
-    { .type=CMD_CHANGE_DECOR, .change_decor={ 5, 2, DECOR_NONE } },
+    { .type=CMD_CHANGE_DECOR, .change_decor={ 19, 3, DECOR_NONE } },
 };
 static const EventCmd s_m7_ev3_cmds[] = {
+    { .type=CMD_FLAG_CHANGE, .flag_change={ 12, true } },
+    { .type=CMD_CHANGE_DECOR, .change_decor={ 13, 13, DECOR_NONE } },
+    { .type=CMD_DISPLAY_MESSAGE, .message={ "MIMIC DOWN!", 25 } },
+};
+static const EventCmd s_m7_ev4_cmds[] = {
+    { .type=CMD_FLAG_CHECK, .flag_check={ 12, -1 } },
+    { .type=CMD_DISPLAY_MESSAGE, .message={ "IT BITES!", 18 } },
+    { .type=CMD_BATTLE, .battle={ ENEMY_GOLEM, 3, true } },
+};
+static const EventCmd s_m7_ev5_cmds[] = {
     { .type=CMD_FLAG_CHECK, .flag_check={ 13, -1 } },
     { .type=CMD_FLAG_CHANGE, .flag_change={ 13, true } },
     { .type=CMD_SHAKE, .shake={ 6, 3 } },
-    { .type=CMD_CHANGE_DECOR, .change_decor={ 18, 13, DECOR_NONE } },
+    { .type=CMD_CHANGE_DECOR, .change_decor={ 10, 14, DECOR_NONE } },
     { .type=CMD_DISPLAY_MESSAGE, .message={ "A GATE OPENS", 25 } },
 };
-static const EventCmd s_m7_ev4_cmds[] = {
+static const EventCmd s_m7_ev6_cmds[] = {
     { .type=CMD_DIALOG, .dialog={ &s_m7_note0_dialog } },
 };
-static const EventCmd s_m7_ev5_cmds[] = {
+static const EventCmd s_m7_ev7_cmds[] = {
     { .type=CMD_OPEN_SHOP },
 };
 
@@ -48,9 +58,11 @@ const Event MAP7_EVENT_TABLE[] = {
     { s_m7_ev0_cmds, ARRAY_LENGTH(s_m7_ev0_cmds), NO_EVENT_TRIGGER },
     { s_m7_ev1_cmds, ARRAY_LENGTH(s_m7_ev1_cmds), EVENT_TRIGGER_STEP },
     { s_m7_ev2_cmds, ARRAY_LENGTH(s_m7_ev2_cmds), EVENT_TRIGGER_STEP },
-    { s_m7_ev3_cmds, ARRAY_LENGTH(s_m7_ev3_cmds), EVENT_TRIGGER_FORWARD },
-    { s_m7_ev4_cmds, ARRAY_LENGTH(s_m7_ev4_cmds), EVENT_TRIGGER_FORWARD },
+    { s_m7_ev3_cmds, ARRAY_LENGTH(s_m7_ev3_cmds), NO_EVENT_TRIGGER },
+    { s_m7_ev4_cmds, ARRAY_LENGTH(s_m7_ev4_cmds), EVENT_TRIGGER_STEP },
     { s_m7_ev5_cmds, ARRAY_LENGTH(s_m7_ev5_cmds), EVENT_TRIGGER_FORWARD },
+    { s_m7_ev6_cmds, ARRAY_LENGTH(s_m7_ev6_cmds), EVENT_TRIGGER_FORWARD },
+    { s_m7_ev7_cmds, ARRAY_LENGTH(s_m7_ev7_cmds), EVENT_TRIGGER_FORWARD },
 };
 #define MAP7_EVENT_COUNT ARRAY_LENGTH(MAP7_EVENT_TABLE)
 #define MAP7_START_EVENT 0

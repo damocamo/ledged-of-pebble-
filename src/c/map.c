@@ -318,16 +318,20 @@ const DecorView DECOR_VIEWS[DECOR_TYPE_COUNT][VIEW_SLOT_COUNT] = {
         { 44, 15, 10, 18, 236,-16,  true, false },
         DV_NONE,
     },
-    // DECOR_ALCOVE_FULL (17) — placeholder: reuse the CHEST sprite (item placed)
+    // DECOR_ALCOVE_FULL (17) — wall niche (same as ALCOVE_EMPTY). Chest art
+    // here read as unreachable loot inside the wall; the opening gate plus
+    // "THE GATE OPENS" message is the insert feedback instead.
     {
         DV_NONE, DV_NONE,
-        { 84, 14, 28, 21,  20,  4, false, false },
-        { 84, 14, 28, 21, 184,  4,  true, false },
-        {112, 14, 24, 21, 106,  4, false, false },
-        {118, 89, 30, 32,   0,  4, false, false },
-        {118, 89, 30, 32, 200,  4,  true, false },
-        {164,183, 38, 32,  92,  4, false, false },
-        DV_NONE, DV_NONE, DV_NONE,
+        { 54, 18, 30, 10,  32,-10, false, false },
+        { 54, 18, 30, 10, 168,-10,  true, false },
+        { 54, 18, 10, 10, 120,-10, false, false },
+        { 53,231, 35, 17,   0,-16, false, false },
+        { 53,231, 35, 17, 190,-16,  true, false },
+        { 42,231, 17, 17, 112,-16, false, false },
+        { 44, 15, 10, 18,   4,-16, false, false },
+        { 44, 15, 10, 18, 236,-16,  true, false },
+        DV_NONE,
     },
     // DECOR_STATIC_PILE (18) — reuse skull pile art
     {

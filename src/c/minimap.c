@@ -13,6 +13,7 @@
 
 // ---- State --------------------------------------------------------------
 static bool   s_open        = false;
+static bool   s_legend      = false;   // UP toggles the marker legend page
 static Layer *s_canvas_ref  = NULL;
 static int    s_cur_map     = -1;
 
@@ -54,16 +55,29 @@ bool minimap_is_open(void) { return s_open; }
 
 void minimap_open(void) {
     s_open = true;
+    s_legend = false;
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 }
 
 void minimap_close(void) {
     s_open = false;
+    s_legend = false;
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 }
 
 void minimap_toggle(void) {
     s_open = !s_open;
+    s_legend = false;
+#ifdef SCREENSHOT_REVEAL
+    // Capture harness only: opening the map acts like buying MAP REVEAL.
+    if (s_open) minimap_reveal_all(g_player.map_id);
+#endif
+    if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
+}
+
+void minimap_input_up(void) {
+    if (!s_open) return;
+    s_legend = !s_legend;
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 }
 
@@ -135,8 +149,59 @@ static bool cell_revealed(int x, int y) {
 
 #define MM_TEXT_H  24   // bitfont glyph height (FONT_HEIGHT * FONT_SCALE)
 
+// Legend page: what each marker color means. Rows use the exact argb values
+// the map draws with so the swatches always match.
+typedef struct { uint8_t argb; const char *label; } LegendRow;
+
+static void draw_legend(GBitmap *fb) {
+    static const LegendRow k_rows[] = {
+        { 0b11110000, "YOU"        },   // red (player marker)
+        { 0b11001100, "MERCHANT"   },   // green
+        { 0b11111000, "CHEST"      },   // orange
+        { 0b11010111, "REST BED"   },   // blue
+        { 0b11111100, "DOOR/GATE"  },   // yellow
+        { 0b11001111, "SWITCH/KEY" },   // cyan
+        { 0b11110011, "TELEPORT"   },   // magenta
+        { 0b11011101, "STATIC"     },   // bright green
+        { 0b11010000, "PIT"        },   // dark red
+        { 0b11100100, "BLOCK"      },   // tan
+    };
+    GRect b = gbitmap_get_bounds(fb);
+    int W = b.size.w, H = b.size.h;
+    fb_fill(fb, 0, 0, W, H, GColorBlack);
+
+    // Ten rows at 17px need a tall screen; on shorter displays (gabbro,
+    // 168px) drop to scale-1 text so the whole key still fits.
+    const bool big   = (H >= 210);
+    const int  scale = big ? 2 : 1;
+    const int  row_h = big ? 17 : 12;
+    const int  sw    = big ? 14 : 9;            // swatch size
+
+    bitfont_render(fb, "MAP KEY", W / 2, 2, JUSTIFY_CENTERV);
+
+    const int rows = (int)ARRAY_LENGTH(k_rows);
+    int y    = MM_TEXT_H + (big ? 8 : 4);
+    int sw_x = big ? 16 : 10;                   // swatch column
+    int tx   = sw_x + sw + 8;                   // label column
+
+    for (int i = 0; i < rows; i++) {
+        GColor c; c.argb = k_rows[i].argb;
+        fb_fill(fb, sw_x, y + 1, sw, sw, c);
+        bitfont_render_scaled(fb, k_rows[i].label, tx, y, JUSTIFY_LEFT, scale);
+        y += row_h;
+    }
+
+    bitfont_render_scaled(fb, "UP:MAP  SEL:CLOSE", W / 2,
+                          H - 10 * scale, JUSTIFY_CENTERV, scale);
+}
+
 void minimap_draw(GBitmap *fb) {
     if (!s_open) return;
+
+    if (s_legend) {
+        draw_legend(fb);
+        return;
+    }
 
     GRect b = gbitmap_get_bounds(fb);
     int W = b.size.w, H = b.size.h;
@@ -145,7 +210,7 @@ void minimap_draw(GBitmap *fb) {
     fb_fill(fb, 0, 0, W, H, GColorBlack);
 
     int cx = W / 2;
-    static char title[16];
+    static char title[20];
     snprintf(title, sizeof(title), "MAP  L%d", g_player.map_id + 1);
     bitfont_render(fb, title, cx, 2, JUSTIFY_CENTERV);
 
@@ -198,9 +263,36 @@ void minimap_draw(GBitmap *fb) {
             uint8_t t = map_get_tile(x, y);
             if (t == TILE_BLANK) continue;   // void — leave black
 
+            // Landmark decor you've walked past gets its own marker color
+            // (never enemies — encounters aren't map decor). Reveal follows
+            // the same rule as tiles: visited or bordering a visited cell.
+            // 0 = not a landmark; fall back to tile color.
+            static const uint8_t k_decor_argb[DECOR_TYPE_COUNT] = {
+                [DECOR_DOOR]         = 0b11111100,  // yellow
+                [DECOR_GATE]         = 0b11111100,
+                [DECOR_LOCKED_DOOR]  = 0b11111100,
+                [DECOR_MAREN]        = 0b11001100,  // green — merchant
+                [DECOR_CHEST]        = 0b11111000,  // orange
+                [DECOR_HAYBED]       = 0b11010111,  // blue — rest
+                [DECOR_TELEPORT]     = 0b11110011,  // magenta
+                [DECOR_PIT]          = 0b11010000,  // dark red
+                [DECOR_STATIC_PILE]  = 0b11011101,  // bright green
+                [DECOR_BLOCK]        = 0b11100100,  // tan
+                [DECOR_PLATE_UP]     = 0b11001111,  // cyan — switches/locks
+                [DECOR_PLATE_DOWN]   = 0b11001111,
+                [DECOR_SWITCH_DOWN]  = 0b11001111,
+                [DECOR_SWITCH_UP]    = 0b11001111,
+                [DECOR_F_SWITCH]     = 0b11001111,
+                [DECOR_KEYHOLE]      = 0b11001111,
+                [DECOR_ALCOVE_EMPTY] = 0b11001111,
+                [DECOR_ALCOVE_FULL]  = 0b11001111,
+            };
             GColor c;
             uint8_t d = map_get_decor(x, y);
-            if (t == TILE_DOOR || d == DECOR_DOOR || d == DECOR_GATE) {
+            uint8_t argb = (d < DECOR_TYPE_COUNT) ? k_decor_argb[d] : 0;
+            if (argb) {
+                c.argb = argb;
+            } else if (t == TILE_DOOR) {
                 c = c_door;
             } else if (is_wall_tile(t)) {
                 c = c_wall;
@@ -227,6 +319,7 @@ void minimap_draw(GBitmap *fb) {
         default: break;
     }
 
-    // Footer hint — anchored so its full 24px height stays on-screen.
-    bitfont_render(fb, "SEL:CLOSE", cx, H - MM_TEXT_H - 2, JUSTIFY_CENTERV);
+    // Footer hint — anchored so its full height stays on-screen.
+    bitfont_render_scaled(fb, "UP:KEY  SEL:CLOSE", cx, H - 20,
+                          JUSTIFY_CENTERV, 2);
 }

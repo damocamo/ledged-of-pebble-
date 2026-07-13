@@ -33,7 +33,7 @@ static const EventCmd s_m2_ev0_cmds[] = {
 };
 static const EventCmd s_m2_ev1_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "DESCENDING...", 20 } },
-    { .type=CMD_CHANGE_MAP, .change_map={ 2, 8, 2, 1 } },
+    { .type=CMD_CHANGE_MAP, .change_map={ 2, 1, 1, 1 } },
 };
 static const EventCmd s_m2_ev2_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "BLINK!", 15 } },

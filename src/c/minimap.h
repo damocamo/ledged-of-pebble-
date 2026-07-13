@@ -18,6 +18,9 @@ void minimap_open(void);
 void minimap_close(void);
 void minimap_toggle(void);
 
+// UP while the map is open toggles the marker-color legend page.
+void minimap_input_up(void);
+
 // Record that the player currently occupies (x,y) on map_id. When map_id
 // changes it persists the map being left and restores the explored set for
 // the map being entered.

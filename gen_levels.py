@@ -28,6 +28,8 @@ ASCII legend (per cell):
 """
 
 import os
+import random
+from collections import deque
 
 SRC = os.path.join(os.path.dirname(__file__), "src", "c")
 
@@ -112,6 +114,171 @@ def _rows(g):
     return [''.join(r) for r in g]
 
 
+# ---- Maze machinery (levels 3+) -------------------------------------------
+# Seeded recursive-backtracker mazes: 1-wide corridors, optional loops.
+# Cells live on odd coordinates; walls between. Deterministic per seed.
+
+def _maze(W, H, seed, loops=0):
+    rnd = random.Random(seed)
+    g = [['#'] * W for _ in range(H)]
+    stack = [(1, 1)]
+    g[1][1] = '.'
+    while stack:
+        x, y = stack[-1]
+        dirs = [(2, 0), (-2, 0), (0, 2), (0, -2)]
+        rnd.shuffle(dirs)
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if 1 <= nx < W - 1 and 1 <= ny < H - 1 and g[ny][nx] == '#':
+                g[y + dy // 2][x + dx // 2] = '.'
+                g[ny][nx] = '.'
+                stack.append((nx, ny))
+                break
+        else:
+            stack.pop()
+    # Knock a few walls to add loops (keeps navigation confusing, less linear)
+    cand = [(x, y) for y in range(1, H - 1) for x in range(1, W - 1)
+            if g[y][x] == '#'
+            and ((g[y][x - 1] == '.' and g[y][x + 1] == '.')
+                 or (g[y - 1][x] == '.' and g[y + 1][x] == '.'))]
+    rnd.shuffle(cand)
+    for (x, y) in cand[:loops]:
+        g[y][x] = '.'
+    return g
+
+
+_SOLID = set('#0 IgBZkOM')
+
+
+def _reach_ascii(g, start):
+    """BFS over the ASCII grid; gates/blocks/statics/locked/merchant solid."""
+    H, W = len(g), len(g[0])
+    q = deque([start])
+    seen = {start}
+    while q:
+        x, y = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if (0 <= nx < W and 0 <= ny < H and (nx, ny) not in seen
+                    and g[ny][nx] not in _SOLID):
+                seen.add((nx, ny))
+                q.append((nx, ny))
+    return seen
+
+
+def _far_dead_ends(g, start):
+    """Dead-end cells sorted farthest-first by BFS distance from start."""
+    H, W = len(g), len(g[0])
+    dist = {start: 0}
+    q = deque([start])
+    while q:
+        x, y = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if (0 <= nx < W and 0 <= ny < H and (nx, ny) not in dist
+                    and g[ny][nx] not in _SOLID):
+                dist[(nx, ny)] = dist[(x, y)] + 1
+                q.append((nx, ny))
+    ends = []
+    for (x, y), d in dist.items():
+        if (x, y) == start or g[y][x] != '.':
+            continue
+        walls = sum(1 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                    if g[y + dy][x + dx] == '#')
+        if walls == 3:
+            ends.append((d, x, y))
+    ends.sort(reverse=True)
+    return [(x, y) for (_d, x, y) in ends]
+
+
+def _dead_end_neighbor(g, x, y):
+    """The single corridor cell adjacent to a dead end (its neck)."""
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        if g[y + dy][x + dx] not in _SOLID and g[y + dy][x + dx] != '#':
+            return (x + dx, y + dy)
+    return None
+
+
+def _exit_columns(g):
+    """Columns whose bottom maze row (H-2) is corridor — valid exit hookups."""
+    H, W = len(g), len(g[0])
+    return [x for x in range(1, W - 1) if g[H - 2][x] == '.']
+
+
+def _append_plain_exit(g, gx, door='.'):
+    """Open/gated/Keeper doorway in the bottom border + stairs row below."""
+    W = len(g[0])
+    g[-1] = ['#'] * W
+    g[-1][gx] = door                     # '.', 'g' or 'K'
+    stairs = ['#'] * W
+    stairs[gx] = '<'
+    g.append(stairs)
+
+
+def _append_block_exit(g, door_x):
+    """Grimrock lock: a 1-tall antechamber with a pushable block. Shove the
+    block east onto the plate to hold the stair gate (just west of the block)
+    open. The plate sits against the corridor's east wall so the block can
+    never overshoot, and the corridor is 1 tile tall so it can never be
+    wedged sideways."""
+    W = len(g[0])
+    px = W - 3                           # plate, wall right behind it
+    bx = door_x + 2                      # block — player pushes from the west
+    gx = door_x + 1                      # stair gate, west of the block
+    assert bx < px
+    g[-1] = ['#'] * W
+    g[-1][door_x] = '.'                  # doorway from the maze
+    corridor = ['#'] * W
+    for x in range(door_x, px + 1):
+        corridor[x] = '.'
+    corridor[bx] = 'B'
+    corridor[px] = 'p'
+    g.append(corridor)
+    gate_row = ['#'] * W
+    gate_row[gx] = 'g'
+    g.append(gate_row)
+    stairs = ['#'] * W
+    stairs[gx] = '<'
+    g.append(stairs)
+
+
+def _sprinkle_pits(g, start, tips, count):
+    """Turn dead-end tips into pits (fall damage + reset) — never on the path."""
+    placed = 0
+    for (x, y) in tips:
+        if placed >= count:
+            break
+        if g[y][x] == '.':
+            g[y][x] = 'O'
+            placed += 1
+
+
+def _secret_shortcuts(g, seed, count):
+    """Convert a few corridor-separating walls into illusory walls."""
+    rnd = random.Random(seed)
+    H, W = len(g), len(g[0])
+    cand = [(x, y) for y in range(1, H - 1) for x in range(1, W - 1)
+            if g[y][x] == '#'
+            and ((g[y][x - 1] == '.' and g[y][x + 1] == '.')
+                 or (g[y - 1][x] == '.' and g[y + 1][x] == '.'))]
+    rnd.shuffle(cand)
+    for (x, y) in cand[:count]:
+        g[y][x] = '%'
+
+
+def _locked_shortcut(g, seed):
+    """Turn one corridor-separating wall into a Decode-locked door."""
+    rnd = random.Random(seed)
+    H, W = len(g), len(g[0])
+    cand = [(x, y) for y in range(1, H - 1) for x in range(1, W - 1)
+            if g[y][x] == '#'
+            and ((g[y][x - 1] == '.' and g[y][x + 1] == '.')
+                 or (g[y - 1][x] == '.' and g[y + 1][x] == '.'))]
+    if cand:
+        x, y = rnd.choice(cand)
+        g[y][x] = 'k'
+
+
 # ---- Distinct LOP layouts ------------------------------------------------
 
 def _lvl1():
@@ -147,176 +314,174 @@ def _lvl2():
     return dict(level=2, rows=_rows(g), theme="rift")
 
 
+def _mount_wall(g, x, y, ch):
+    """Put ch on the wall a dead-end tip faces (opposite its neck)."""
+    neck = _dead_end_neighbor(g, x, y)
+    if not neck:
+        return False
+    wx, wy = x + (x - neck[0]), y + (y - neck[1])
+    if 0 <= wy < len(g) and 0 <= wx < len(g[0]) and g[wy][wx] == '#':
+        g[wy][wx] = ch
+        return True
+    return False
+
+
+def _take_tips(g, start, n):
+    """Farthest-first dead-end tips that are still plain floor."""
+    tips = [(x, y) for (x, y) in _far_dead_ends(g, start) if g[y][x] == '.']
+    assert len(tips) >= n, f"maze has {len(tips)} tips, need {n}"
+    return tips
+
+
+def _maze_with_tips(W, H, seed, loops, min_tips):
+    """Generate a maze that still has at least min_tips dead ends after
+    loop-carving (loops erase dead ends, so retry nearby seeds)."""
+    for attempt in range(50):
+        g = _maze(W, H, seed + attempt * 1000, loops)
+        if len(_far_dead_ends(g, (1, 1))) >= min_tips:
+            return g
+    raise AssertionError(f"no maze {W}x{H} seed~{seed} with {min_tips} tips")
+
+
 def _lvl3():
-    # Cross-shaped hall; push block onto plate for exit.
-    g = _mk(18, 14)
-    for y in range(1, 13):
-        for x in range(1, 17):
-            g[y][x] = '#'
-    _carve_room(g, 7, 1, 10, 12)
-    _carve_room(g, 1, 5, 16, 8)
-    g[2][8] = '@'
-    g[6][3] = 'B'
-    g[6][14] = 'p'
-    g[3][9] = 'C'                          # Spellbook: Heal
-    for x in range(1, 17):
-        g[11][x] = '#'
-    g[11][8] = 'g'
-    g[12][8] = '<'
-    for y in (9, 10):
-        g[y][8] = '.'
-        g[y][9] = '.'
-    _pillars(g, [(8, 4), (9, 10)])
-    return dict(level=3, rows=_rows(g), theme="cross")
+    # First maze: tight corridors, Heal book deep inside, push-block exit lock.
+    g = _maze_with_tips(17, 11, seed=33, loops=2, min_tips=3)
+    g[1][1] = '@'
+    tips = _take_tips(g, (1, 1), 3)
+    tx, ty = tips[0]
+    g[ty][tx] = 'C'                        # Spellbook: Heal
+    sx, sy = tips[1]
+    g[sy][sx] = 'S'                        # note
+    cols = [c for c in _exit_columns(g) if c <= len(g[0]) - 6]
+    _append_block_exit(g, cols[len(cols) // 2])
+    return dict(level=3, rows=_rows(g), theme="maze")
 
 
 def _lvl4():
-    # Ring corridor around a solid core; teleporter drops you inside, walk south out.
-    g = _mk(20, 15)
-    for y in range(4, 11):
-        for x in range(5, 14):
-            g[y][x] = '#'
-    for y in range(5, 10):
-        for x in range(6, 13):
-            g[y][x] = '.'
+    # Maze with pit traps in dead ends; teleporter jumps deep to the HP gem.
+    g = _maze_with_tips(21, 13, seed=44, loops=3, min_tips=6)
     g[1][1] = '@'
-    g[2][2] = 'T'
-    g[7][9] = 'L'
-    g[10][9] = '.'
-    g[11][9] = '.'
-    g[6][7] = 'C'                          # +5 Max HP gem
-    for (x, y) in [(3, 3), (16, 3), (3, 12), (16, 12)]:
-        g[y][x] = 'O'
-    _exit_chamber(g, gate=False, gx=9)
-    return dict(level=4, rows=_rows(g), theme="ring")
+    tips = _take_tips(g, (1, 1), 6)
+    lx, ly = tips[0]
+    g[ly][lx] = 'L'                        # landing deep in the maze
+    nb = _dead_end_neighbor(g, lx, ly)
+    g[nb[1]][nb[0]] = 'C'                  # +5 Max HP gem beside the landing
+    t2x, t2y = tips[1]
+    g[t2y][t2x] = 'T'                      # teleporter pad far from the loot
+    _sprinkle_pits(g, (1, 1), tips[2:5], 3)
+    sx, sy = tips[5]
+    g[sy][sx] = 'S'
+    _secret_shortcuts(g, seed=45, count=2)
+    cols = _exit_columns(g)
+    _append_plain_exit(g, cols[-1])
+    return dict(level=4, rows=_rows(g), theme="pitmaze")
 
 
 def _lvl5():
-    # Zigzag pit gauntlet — safe path snakes through. Keeper waits near exit.
-    g = _mk(22, 14)
+    # Keeper's warren: merchant near the start, pits, Keeper guards the stairs.
+    g = _maze_with_tips(21, 13, seed=55, loops=3, min_tips=6)
     g[1][1] = '@'
-    for y in range(3, 11):
-        for x in range(2, 20):
-            g[y][x] = 'O'
-    path = [(2, 3), (3, 3), (4, 3), (4, 4), (4, 5), (5, 5), (6, 5), (7, 5),
-            (7, 6), (7, 7), (8, 7), (9, 7), (10, 7), (10, 8), (10, 9),
-            (11, 9), (12, 9), (13, 9), (14, 9), (14, 10), (15, 10),
-            (16, 10), (17, 10), (18, 10), (19, 10)]
-    for (x, y) in path:
-        g[y][x] = '.'
-    g[2][18] = 'S'
-    g[1][3] = 'M'
-    g[10][17] = 'K'                        # The Keeper mid-boss
-    _exit_chamber(g, gate=False, gx=19)
-    return dict(level=5, rows=_rows(g), theme="zigzag")
+    tips = _take_tips(g, (1, 1), 6)
+    mx, my = tips[-1]                      # nearest tip: merchant
+    g[my][mx] = 'M'
+    sx, sy = tips[0]
+    g[sy][sx] = 'S'
+    _sprinkle_pits(g, (1, 1), tips[1:5], 4)
+    cols = _exit_columns(g)
+    _append_plain_exit(g, cols[-1], door='K')   # Keeper blocks the doorway
+    return dict(level=5, rows=_rows(g), theme="warren")
 
 
 def _lvl6():
-    # Three chambers. Button + chest in chamber 1 open gate 1.
-    g = _mk(24, 14)
-    for y in range(1, 13):
-        g[y][7] = '#'
-        g[y][15] = '#'
+    # Key + alcove maze: find the key chest, feed the far alcove, gate opens.
+    g = _maze_with_tips(23, 13, seed=66, loops=4, min_tips=6)
     g[1][1] = '@'
-    g[4][7] = 'g'
-    g[4][15] = 'g'
-    g[2][3] = 'c'
-    g[2][5] = '!'
-    g[6][15] = 'a'
-    g[10][18] = 'H'
-    g[8][10] = 'C'                         # +1 Atk gem
-    g[9][11] = 'Z'                         # static pile (needs Purge later)
-    _exit_chamber(g, gate=False, gx=20)
-    _pillars(g, [(3, 6), (11, 6), (19, 6)])
-    return dict(level=6, rows=_rows(g), theme="chambers")
+    tips = _take_tips(g, (1, 1), 6)
+    cx_, cy_ = tips[0]
+    g[cy_][cx_] = 'c'                      # key chest, deepest tip
+    ax, ay = tips[1]
+    assert _mount_wall(g, ax, ay, 'a')     # alcove wall at another far tip
+    gx_, gy_ = tips[2]
+    g[gy_][gx_] = 'C'                      # +1 Atk gem
+    hx, hy = tips[-1]
+    g[hy][hx] = 'H'                        # haybed near start
+    zx, zy = tips[3]
+    nb = _dead_end_neighbor(g, zx, zy)
+    g[nb[1]][nb[0]] = 'Z'                  # static teaser (optional, needs Purge)
+    sx, sy = tips[4]
+    g[sy][sx] = 'S'
+    cols = _exit_columns(g)
+    _append_plain_exit(g, cols[-1], door='g')   # alcove opens this gate
+    return dict(level=6, rows=_rows(g), theme="keymaze")
 
 
 def _lvl7():
-    # Illusory wall maze + static piles + locked door shortcut.
-    g = _mk(22, 16)
+    # Illusion maze: secret walls, statics guard loot, button opens the exit.
+    g = _maze_with_tips(23, 15, seed=77, loops=3, min_tips=7)
     g[1][1] = '@'
-    for x in range(1, 21):
-        g[4][x] = '#'
-        g[8][x] = '#'
-        g[12][x] = '#'
-    g[4][3] = '%'
-    g[4][14] = '.'
-    g[8][8] = '%'
-    g[8][18] = '.'
-    g[12][5] = '.'
-    g[12][16] = '%'
-    g[12][18] = '.'
-    for x in range(1, 21):
-        g[13][x] = '#'
-    g[13][16] = '!'
-    g[13][18] = 'g'
-    g[14][17] = '.'
-    g[14][18] = '<'
-    g[14][19] = '.'
-    g[6][10] = 'S'
-    g[2][2] = 'M'
-    g[2][5] = 'C'                          # Spellbook: Purge
-    g[6][3] = 'Z'
-    g[10][14] = 'Z'
-    g[6][16] = 'k'                         # locked door shortcut
-    _pillars(g, [(6, 2), (16, 6), (10, 10)])
+    tips = _take_tips(g, (1, 1), 7)
+    bx, by = tips[0]
+    assert _mount_wall(g, bx, by, '!')     # exit button at the deepest tip
+    cx_, cy_ = tips[1]
+    g[cy_][cx_] = 'C'                      # Spellbook: Purge (freely reachable)
+    zx, zy = tips[2]
+    nb = _dead_end_neighbor(g, zx, zy)
+    g[zy][zx] = 'm'                        # mimic behind a static pile
+    g[nb[1]][nb[0]] = 'Z'
+    z2x, z2y = tips[3]
+    g[z2y][z2x] = 'Z'
+    mx, my = tips[-1]
+    g[my][mx] = 'M'
+    sx, sy = tips[4]
+    g[sy][sx] = 'S'
+    _secret_shortcuts(g, seed=78, count=3)
+    _locked_shortcut(g, seed=79)           # Decode shortcut between corridors
+    cols = _exit_columns(g)
+    _append_plain_exit(g, cols[len(cols) // 2], door='g')  # button-gated exit
     return dict(level=7, rows=_rows(g), theme="illusion")
 
 
 def _lvl8():
-    # Block+plate + teleporter shortcut over a pit field.
-    g = _mk(24, 16)
+    # Deep maze: teleporter shortcut, mimic, def gem, push-block exit lock.
+    g = _maze_with_tips(25, 15, seed=88, loops=4, min_tips=7)
     g[1][1] = '@'
-    g[2][3] = 'B'
-    g[2][12] = 'p'
-    g[5][2] = 'T'
-    g[5][20] = 'L'
-    for y in range(7, 12):
-        for x in range(4, 18):
-            g[y][x] = 'O'
-    for x in range(4, 18):
-        g[9][x] = '.'
-    g[9][10] = 'S'
-    g[3][6] = 'm'                          # mimic ambush
-    g[3][8] = 'C'                          # +1 Def gem
-    g[11][20] = 'Z'
-    g[12][19] = 'k'
-    _exit_chamber(g, gate=True, gx=20)
-    _pillars(g, [(6, 3), (18, 3), (6, 13), (18, 13)])
-    return dict(level=8, rows=_rows(g), theme="bridge")
+    tips = _take_tips(g, (1, 1), 7)
+    dx_, dy_ = tips[0]
+    g[dy_][dx_] = 'C'                      # +1 Def gem
+    mx, my = tips[1]
+    g[my][mx] = 'm'                        # mimic ambush
+    lx, ly = tips[2]
+    g[ly][lx] = 'L'
+    t_x, t_y = tips[-1]
+    g[t_y][t_x] = 'T'                      # near-start pad jumps deep
+    zx, zy = tips[3]
+    nb = _dead_end_neighbor(g, zx, zy)
+    g[nb[1]][nb[0]] = 'Z'                  # static guards a pit-free cul-de-sac
+    sx, sy = tips[4]
+    g[sy][sx] = 'S'
+    _secret_shortcuts(g, seed=89, count=2)
+    cols = [c for c in _exit_columns(g) if c <= len(g[0]) - 6]
+    _append_block_exit(g, cols[len(cols) // 2])
+    return dict(level=8, rows=_rows(g), theme="deepmaze")
 
 
 def _lvl9():
-    # Dense pit lattice + block/plate; secret wall drops onto the safe path.
-    g = _mk(24, 17)
+    # Hardest maze: pits, statics on gold, mimic, secret walls, block lock.
+    g = _maze_with_tips(25, 15, seed=99, loops=2, min_tips=8)
     g[1][1] = '@'
-    g[2][2] = 'B'
-    g[2][14] = 'p'
-    for y in range(4, 14):
-        for x in range(2, 22):
-            if (x + y) % 2 == 0:
-                g[y][x] = 'O'
-    path = [(3, 4), (3, 5), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6),
-            (7, 7), (7, 8), (8, 8), (9, 8), (10, 8), (11, 8),
-            (11, 9), (11, 10), (12, 10), (13, 10), (14, 10), (15, 10),
-            (15, 11), (15, 12), (16, 12), (17, 12), (18, 12), (19, 12),
-            (19, 13), (20, 13)]
-    for (x, y) in path:
-        g[y][x] = '.'
-    for x in range(1, 23):
-        g[3][x] = '#'
-    g[3][3] = '%'
-    for x in range(1, 23):
-        g[14][x] = '#'
-    g[14][20] = 'g'
-    g[15][18] = '.'
-    g[15][19] = '.'
-    g[15][20] = '<'
-    g[15][21] = '.'
-    g[8][9] = 'Z'
-    g[12][16] = 'Z'
-    g[10][12] = 'C'                        # gold cache
-    g[6][7] = 'm'                          # mimic
+    tips = _take_tips(g, (1, 1), 8)
+    gx_, gy_ = tips[0]
+    nb = _dead_end_neighbor(g, gx_, gy_)
+    g[gy_][gx_] = 'C'                      # gold cache
+    g[nb[1]][nb[0]] = 'Z'                  # ...behind a static pile
+    mx, my = tips[1]
+    g[my][mx] = 'm'                        # mimic
+    _sprinkle_pits(g, (1, 1), tips[2:6], 4)
+    sx, sy = tips[6]
+    g[sy][sx] = 'S'
+    _secret_shortcuts(g, seed=98, count=3)
+    cols = [c for c in _exit_columns(g) if c <= len(g[0]) - 6]
+    _append_block_exit(g, cols[-1])
     return dict(level=9, rows=_rows(g), theme="lattice")
 
 
@@ -359,6 +524,23 @@ def _lvl10():
 
 LEVELS = [_lvl1(), _lvl2(), _lvl3(), _lvl4(), _lvl5(),
           _lvl6(), _lvl7(), _lvl8(), _lvl9(), _lvl10()]
+
+
+_WALKABLE_CHARS = set('.,@BpgTOcCLm<XKSH12345Z%')
+_FACING_VALUE = {"FACING_NORTH": 0, "FACING_EAST": 1,
+                 "FACING_SOUTH": 2, "FACING_WEST": 3}
+
+
+def _start_facing(rows, start):
+    """Face the player toward an open corridor (mazes often wall the east)."""
+    sx, sy = start
+    for name, (dx, dy) in (("FACING_EAST", (1, 0)), ("FACING_SOUTH", (0, 1)),
+                           ("FACING_NORTH", (0, -1)), ("FACING_WEST", (-1, 0))):
+        nx, ny = sx + dx, sy + dy
+        if 0 <= ny < len(rows) and 0 <= nx < len(rows[ny]) \
+                and rows[ny][nx] in _WALKABLE_CHARS:
+            return name
+    return "FACING_EAST"
 
 
 def blank_grid(fill):
@@ -489,6 +671,7 @@ def build_level(lvl):
                 seq[int(ch)] = (x, y)
 
     assert start, f"L{level}: no start"
+    start_facing = _start_facing(rows, start)
 
     links = []
     for i, (px, py) in enumerate(plates):
@@ -539,9 +722,10 @@ def build_level(lvl):
                 if nsx is not None:
                     break
             assert nsx is not None, f"L{level}: next map has no start"
+            nfac = _FACING_VALUE[_start_facing(LEVELS[level]["rows"], (nsx, nsy))]
             cmds = [
                 '{ .type=CMD_DISPLAY_MESSAGE, .message={ "DESCENDING...", 20 } }',
-                f'{{ .type=CMD_CHANGE_MAP, .change_map={{ {nxt}, {nsx}, {nsy}, {FACING_EAST} }} }}',
+                f'{{ .type=CMD_CHANGE_MAP, .change_map={{ {nxt}, {nsx}, {nsy}, {nfac} }} }}',
             ]
         else:
             cmds = ['{ .type=CMD_DIALOG, .dialog={ &s_m10_end_dialog } }']
@@ -858,7 +1042,8 @@ def build_level(lvl):
         events[y][x] = add_event(cmds, "EVENT_TRIGGER_STEP")
 
     return dict(level=level, mapid=mapid, tiles=tiles, decor=decor,
-                events=events, start=start, evs=evs, dialogs=dialogs)
+                events=events, start=start, evs=evs, dialogs=dialogs,
+                start_facing=start_facing)
 
 
 def write_map_header(b):
@@ -879,7 +1064,7 @@ def write_map_header(b):
         "",
         f"#define MAP{level}_START_X {sx}",
         f"#define MAP{level}_START_Y {sy}",
-        f"#define MAP{level}_START_FACING FACING_EAST",
+        f"#define MAP{level}_START_FACING {b['start_facing']}",
         "",
     ]
     with open(p, "w") as fh:

@@ -104,6 +104,11 @@ void encounter_load_paid_kills(const uint8_t *data, int len) {
 }
 
 bool encounter_check(void) {
+#ifdef SCREENSHOT_NO_ENCOUNTERS
+    // Capture harness only: scripted emulator walks must not be interrupted
+    // by random battles.
+    return false;
+#endif
     if (!s_table || s_table->enemy_count == 0) return false;
 
     s_encounter_chance += ENCOUNTER_INCREMENT;

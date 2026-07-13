@@ -28,55 +28,17 @@ static const ItemDef s_items[] = {
 #define ICON_DRAW_SIZE  (ICON_SIZE * ICON_SCALE)
 #define ROW_H           (ICON_DRAW_SIZE + 9)    // px per row
 #define VISIBLE_ROWS     3    // how many rows fit on screen
-#define SCROLL_SPEED     4    // px per tick
-#define SCROLL_MS       16    // ~60fps tick
 
 
 static int s_row_zones[VISIBLE_ROWS];   // y center of each visible row
 static int s_row_zone_count = 0;
-static int s_row_zone_h     = ROW_H;
 
 // ---- State --------------------------------------------------------------
 static bool      s_open        = false;
 static int       s_selected    = 0;     // currently selected index
 static int       s_scroll_y    = 0;     // current scroll offset in px
-static int       s_target_y    = 0;     // target scroll offset in px
 static Layer    *s_canvas_ref  = NULL;
 static GBitmap  *s_icon_atlas  = NULL;
-static AppTimer *s_scroll_timer = NULL;
-
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-
-// ---- Scroll timer -------------------------------------------------------
-static void scroll_tick(void *context) {
-    // s_scroll_timer = NULL;
-    // if (s_scroll_y == s_target_y) return;
-
-    // int diff = s_target_y - s_scroll_y;
-    // int step = diff > 0 ? MIN(SCROLL_SPEED, diff)
-    //                     : MAX(-SCROLL_SPEED, diff);
-    // s_scroll_y += step;
-
-    if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
-
-    // // keep ticking until we reach target
-    // if (s_scroll_y != s_target_y) {
-    //     s_scroll_timer = app_timer_register(SCROLL_MS, scroll_tick, NULL);
-    // }
-}
-
-static void start_scroll(void) {
-    // target keeps selected item centered in visible area
-    s_target_y = s_selected * ROW_H - (VISIBLE_ROWS / 2) * ROW_H;
-    // clamp
-    int max_scroll = (ITEM_COUNT - VISIBLE_ROWS) * ROW_H;
-    if (s_target_y < 0)          s_target_y = 0;
-    if (s_target_y > max_scroll) s_target_y = max_scroll;
-
-    if (s_scroll_timer) app_timer_cancel(s_scroll_timer);
-    s_scroll_timer = app_timer_register(SCROLL_MS, scroll_tick, NULL);
-}
 
 static void build_owned_list(void) {
     s_owned_count = 0;
@@ -108,10 +70,6 @@ void menu_open(void) {
 
 void menu_close(void) {
     s_open = false;
-    if (s_scroll_timer) {
-        app_timer_cancel(s_scroll_timer);
-        s_scroll_timer = NULL;
-    }
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 }
 
@@ -181,9 +139,17 @@ void menu_input_select(void) {
             player_heal(10);
             player_take_item(item_idx, 1);
             break;
-        case ITEM_TYPE_KEY:
-            event_check_item(g_player.x, g_player.y, g_player.facing, -1);
+        case ITEM_TYPE_KEY: {
+            // Keys open alcoves by walking into them (FORWARD trigger).
+            // Using from the menu tries the same facing check; if nothing
+            // happens, hint the player.
+            int before = player_item_count(item_idx);
+            event_check_forward(g_player.x, g_player.y, g_player.facing);
+            if (player_item_count(item_idx) == before) {
+                snprintf(g_magic_msg, sizeof(g_magic_msg), "FACE THE LOCK");
+            }
             break;
+        }
     }
 
     // rebuild list in case item was depleted
@@ -242,6 +208,14 @@ static void draw_icon(GBitmap *fb, int icon_slot, int dest_x, int dest_y) {
     }
 }
 
+// Stats column font: scale 2 (16px lines) so every entry fits a 200px-wide
+// screen. Scale 3 lines (24px) with the old +-90/+-104 offsets ran long names
+// and the MP block off the screen edges.
+#define STAT_SCALE  2
+#define STAT_LH     (8 * STAT_SCALE + 3)   // line height + spacing
+#define STAT_X      6                      // left margin
+#define STAT_GAP    4                      // extra gap between stat groups
+
 void menu_draw(GBitmap *fb) {
     if (!s_open) return;
 
@@ -257,7 +231,8 @@ void menu_draw(GBitmap *fb) {
     s_row_zone_count = 0;  // reset
 
     if (s_owned_count == 0) {
-        bitfont_render(fb, "NO ITEMS", cx, list_top - 27 - 9, JUSTIFY_CENTERV);
+        bitfont_render_scaled(fb, "NO ITEMS", fb_bounds.size.w - STAT_X,
+                              list_top, JUSTIFY_RIGHT, STAT_SCALE);
     } else {
         // draw only the visible window of rows
         for (int vis = 0; vis < VISIBLE_ROWS; vis++) {
@@ -272,66 +247,78 @@ void menu_draw(GBitmap *fb) {
             int quantity        = player_item_count(item_idx);
             bool selected       = (list_idx == s_selected);
 
-
-            // selection indicator and item name at top
+            // selection indicator next to the icon; name shown at the bottom
             if (selected) {
-                bitfont_render(fb, ">", cx + 25, row_y + 10, JUSTIFY_LEFT);
-                bitfont_render(fb, item->name, cx, list_top - 27 - 9, JUSTIFY_CENTERV);
+                bitfont_render_scaled(fb, ">", icon_x - 16,
+                                      row_y + ICON_DRAW_SIZE / 2 - 8,
+                                      JUSTIFY_LEFT, STAT_SCALE);
             }
 
-            // icon
-            
             draw_icon(fb, item->icon_slot, icon_x, row_y);
 
             // quantity
             if (quantity > 0) {
                 static char qty_buf[5];
                 snprintf(qty_buf, sizeof(qty_buf), "%d", (int8_t)quantity);
-                bitfont_render(fb, qty_buf, icon_x + ICON_DRAW_SIZE, row_y + ICON_DRAW_SIZE-18, JUSTIFY_RIGHT);
+                bitfont_render_scaled(fb, qty_buf, fb_bounds.size.w - STAT_X,
+                                      row_y + ICON_DRAW_SIZE - 16,
+                                      JUSTIFY_RIGHT, STAT_SCALE);
             }
         }
 
         // scroll indicators
         if (s_scroll_y > 0)
-            bitfont_render(fb, "^", icon_x + ICON_DRAW_SIZE/2, list_top - 12, JUSTIFY_CENTERV);
+            bitfont_render_scaled(fb, "^", icon_x + ICON_DRAW_SIZE/2,
+                                  list_top - 18, JUSTIFY_CENTERV, STAT_SCALE);
         if (s_scroll_y + VISIBLE_ROWS < s_owned_count)
-            bitfont_render(fb, "v", icon_x + ICON_DRAW_SIZE/2,
-                           list_top + VISIBLE_ROWS * ROW_H - 12, JUSTIFY_CENTERV);
+            bitfont_render_scaled(fb, "v", icon_x + ICON_DRAW_SIZE/2,
+                                  list_top + VISIBLE_ROWS * ROW_H - 14,
+                                  JUSTIFY_CENTERV, STAT_SCALE);
     }
 
-    static char equip_buf[24];
-    snprintf(equip_buf, sizeof(equip_buf), "WEAPON:\n%s",
-            player_get_weapon()->name);
-    bitfont_render(fb, equip_buf, cx - 90, cy - 27*3 + 9, JUSTIFY_LEFT);
+    // ---- Stats column (left) — single fixed-width column, top to bottom ----
+    int sy = 8;
+    static char stat_buf[24];
 
-    snprintf(equip_buf, sizeof(equip_buf), "ARMOR:\n%s",
-            player_get_armor()->name);
-    bitfont_render(fb, equip_buf, cx - 90, cy - 24/2 + 3, JUSTIFY_LEFT);
+    bitfont_render_scaled(fb, "WEAPON:", STAT_X, sy, JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH;
+    bitfont_render_scaled(fb, player_get_weapon()->name, STAT_X, sy,
+                          JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH + STAT_GAP;
 
-    // HP / MP display
-    static char hp_buf[20];
-    snprintf(hp_buf, sizeof(hp_buf), "HP:\n%d/%d", g_player.hp, g_player.max_hp);
-    bitfont_render(fb, hp_buf, cx - 90, cy + 104 - 27 - 24, JUSTIFY_LEFT);
+    bitfont_render_scaled(fb, "ARMOR:", STAT_X, sy, JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH;
+    bitfont_render_scaled(fb, player_get_armor()->name, STAT_X, sy,
+                          JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH + STAT_GAP;
 
-    snprintf(hp_buf, sizeof(hp_buf), "MP:\n%d/%d", g_player.mp, g_player.max_mp);
-    bitfont_render(fb, hp_buf, cx - 90, cy + 104 - 27, JUSTIFY_LEFT);
+    snprintf(stat_buf, sizeof(stat_buf), "HP %d/%d", g_player.hp, g_player.max_hp);
+    bitfont_render_scaled(fb, stat_buf, STAT_X, sy, JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH;
 
-    static char gold_buf[20];
-    snprintf(gold_buf, sizeof(gold_buf), "GOLD:\n%d", player_get_gold());
-    bitfont_render(fb, gold_buf, cx + 90, cy + 104 - 27 - 24, JUSTIFY_RIGHT);
+    snprintf(stat_buf, sizeof(stat_buf), "MP %d/%d", g_player.mp, g_player.max_mp);
+    bitfont_render_scaled(fb, stat_buf, STAT_X, sy, JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH;
+
+    snprintf(stat_buf, sizeof(stat_buf), "GOLD %d", player_get_gold());
+    bitfont_render_scaled(fb, stat_buf, STAT_X, sy, JUSTIFY_LEFT, STAT_SCALE);
+    sy += STAT_LH + STAT_GAP;
 
     if (g_player.spellbook >= SPELL_HEAL) {
-        static char sp_buf[24];
-        snprintf(sp_buf, sizeof(sp_buf), "SPELL:\n%s",
+        snprintf(stat_buf, sizeof(stat_buf), "SP:%s",
                  player_spell_name(magic_selected_spell()));
-        bitfont_render(fb, sp_buf, cx + 90, cy - 27*3 + 9, JUSTIFY_RIGHT);
-    }
-    if (g_magic_msg[0]) {
-        bitfont_render(fb, g_magic_msg, cx, cy + 104 - 48, JUSTIFY_CENTER);
+        bitfont_render_scaled(fb, stat_buf, STAT_X, sy, JUSTIFY_LEFT, STAT_SCALE);
     }
 
-    // hints
-    //bitfont_render(fb, "SL:USE\nBK:EXT", cx + 90, cy + 104 - 27 - 24,  JUSTIFY_RIGHT);
+    // ---- Bottom line: magic feedback, or the selected item's name ----------
+    int bottom_y = fb_bounds.size.h - STAT_LH - 4;
+    if (g_magic_msg[0]) {
+        bitfont_render_scaled(fb, g_magic_msg, cx, bottom_y,
+                              JUSTIFY_CENTERV, STAT_SCALE);
+    } else if (s_owned_count > 0 && s_selected < s_owned_count) {
+        bitfont_render_scaled(fb, s_items[s_owned_list[s_selected]].name,
+                              cx, bottom_y, JUSTIFY_CENTERV, STAT_SCALE);
+    }
 }
 
 // Expose for touch.c

@@ -84,6 +84,7 @@ typedef struct {
 void combat_init(Layer *canvas);
 void combat_start(EnemyId enemy_id, int8_t victory_event, bool can_run);
 bool combat_is_active(void);
+bool combat_can_run(void);
 
 CombatPhase combat_get_phase(void);
 void        combat_dismiss(void);

@@ -22,6 +22,34 @@ GBitmap *s_bitfont;  // add this
 GBitmap *s_icon_atlas;
 GBitmap *s_monsters;  // no static — combat.c needs it
 
+// Monster sprites are loaded one 58x63 slice at a time: the full sheet
+// (~20KB as a GBitmap) no longer fits on the heap next to the tile atlas,
+// which made gbitmap_create_with_resource fail silently and enemies render
+// invisible. combat_start()/shop_open() load the slot they need.
+static int s_monster_slot = -1;
+static const uint32_t MONSTER_RESOURCES[] = {
+    RESOURCE_ID_MONSTER_0, RESOURCE_ID_MONSTER_1, RESOURCE_ID_MONSTER_2,
+    RESOURCE_ID_MONSTER_3, RESOURCE_ID_MONSTER_4, RESOURCE_ID_MONSTER_5,
+    RESOURCE_ID_MONSTER_6, RESOURCE_ID_MONSTER_7, RESOURCE_ID_MONSTER_8,
+    RESOURCE_ID_MONSTER_9, RESOURCE_ID_MONSTER_10,
+};
+
+void monster_bitmap_load(int slot) {
+    if (slot < 0 || slot >= (int)ARRAY_LENGTH(MONSTER_RESOURCES)) return;
+    if (s_monsters && s_monster_slot == slot) return;
+    if (s_monsters) gbitmap_destroy(s_monsters);
+    s_monsters = gbitmap_create_with_resource(MONSTER_RESOURCES[slot]);
+    s_monster_slot = s_monsters ? slot : -1;
+}
+
+void monster_bitmap_unload(void) {
+    if (s_monsters) {
+        gbitmap_destroy(s_monsters);
+        s_monsters = NULL;
+    }
+    s_monster_slot = -1;
+}
+
 typedef struct {
     int dx, dy;   // map offset from player
 } ViewSlot;
@@ -126,9 +154,14 @@ static GColor sample_atlas(uint8_t *atlas_data, int atlas_stride,
 //     }
 // }
 
-void blit_scaled(GBitmap *fb, GContext *ctx,
-                        int src_x, int src_y, int src_w, int src_h,
-                        int dest_x, int dest_y, int scale) {
+// Single blit core: the four public variants only differ in whether the
+// source is mirrored horizontally (flip_h) and/or the sprite is drawn
+// ceiling-mirrored (flip_v, which also flips the destination Y mapping).
+// Folding them saves ~1KB of code on a 64KB budget.
+static void blit_core(GBitmap *fb,
+                      int src_x, int src_y, int src_w, int src_h,
+                      int dest_x, int dest_y, int scale,
+                      bool flip_h, bool flip_v) {
   int draw_w = src_w * scale;
   int draw_h = src_h * scale;
 
@@ -136,24 +169,19 @@ void blit_scaled(GBitmap *fb, GContext *ctx,
   int      atlas_stride = gbitmap_get_bytes_per_row(s_atlas);
   GColor  *palette      = gbitmap_get_palette(s_atlas);
 
-  //GBitmap *fb = graphics_capture_frame_buffer(ctx);
   GRect fb_bounds = gbitmap_get_bounds(fb);
-  //const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x;
   const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x + g_shake_offset.x;
 
   uint8_t row_buf[draw_w];
   bool    row_opaque[draw_w];
 
   for (int y = 0; y < draw_h; y += scale) {
-    int map_y = src_y + (y / scale);
+    int row = y / scale;
+    int map_y = src_y + (flip_v ? (src_h - 1 - row) : row);
 
     for (int sx = 0; sx < src_w; sx++) {
-      int map_x = src_x + sx; 
+      int map_x = src_x + (flip_h ? (src_w - 1 - sx) : sx);
       GColor col = sample_atlas(atlas_data, atlas_stride, palette, map_x, map_y);
-    //   uint8_t argb = col.a ? col.argb : 0xFF; 
-    //   uint16_t doubled = (uint16_t)argb | ((uint16_t)argb << 8);
-    //   *(uint16_t*)(&row_buf[sx * 2]) = doubled;
-
       uint8_t argb = col.argb;  // no sentinel, take value as-is
       bool    opaque = (col.a != 0);
       uint16_t doubled = (uint16_t)argb | ((uint16_t)argb << 8);
@@ -163,8 +191,9 @@ void blit_scaled(GBitmap *fb, GContext *ctx,
     }
 
     for (int dy = 0; dy < scale; dy++) {
-      //int fb_y = fb_bounds.size.h / 2 + dest_y + y + dy;
-      int fb_y = fb_bounds.size.h / 2 + dest_y + y + dy + g_shake_offset.y;
+      int fb_y = flip_v
+        ? fb_bounds.size.h/2 - dest_y - draw_h + y + dy + 2 + g_shake_offset.y
+        : fb_bounds.size.h/2 + dest_y + y + dy + g_shake_offset.y;
       if (fb_y < 0 || fb_y >= fb_bounds.size.h) continue;
       GBitmapDataRowInfo info = gbitmap_get_data_row_info(fb, fb_y);
       if (info.min_x > info.max_x) continue;
@@ -176,158 +205,37 @@ void blit_scaled(GBitmap *fb, GContext *ctx,
       for (int x = copy_start; x < copy_end; x++) {
         if (row_opaque[x])
             info.data[fb_x_start + x] = row_buf[x];
-        //if (row_buf[x] != 0xFF) // non-transparent
-          
       }
     }
   }
+}
+
+void blit_scaled(GBitmap *fb, GContext *ctx,
+                        int src_x, int src_y, int src_w, int src_h,
+                        int dest_x, int dest_y, int scale) {
+  (void)ctx;
+  blit_core(fb, src_x, src_y, src_w, src_h, dest_x, dest_y, scale, false, false);
 }
 
 void blit_scaled_flipv(GBitmap *fb, GContext *ctx,
                               int src_x, int src_y, int src_w, int src_h,
                               int dest_x, int dest_y, int scale) {
-  int draw_w = src_w * scale;
-  int draw_h = src_h * scale;
-
-  uint8_t      *atlas_data   = gbitmap_get_data(s_atlas);
-  int           atlas_stride = gbitmap_get_bytes_per_row(s_atlas);
-  GColor       *palette      = gbitmap_get_palette(s_atlas);
-
-  GRect    fb_bounds = gbitmap_get_bounds(fb);
-  //const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x;
-  const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x + g_shake_offset.x;
-
-  uint8_t row_buf[draw_w];
-  bool    row_opaque[draw_w];
-
-  for (int y = 0; y < draw_h; y += scale) {
-    int map_y = src_y + (src_h - 1 - (y / scale));
-    for (int sx = 0; sx < src_w; sx++) {
-      int map_x = src_x + sx; 
-      GColor col = sample_atlas(atlas_data, atlas_stride, palette, map_x, map_y);
-      uint8_t argb = col.argb;  // no sentinel, take value as-is
-      bool    opaque = (col.a != 0);
-      uint16_t doubled = (uint16_t)argb | ((uint16_t)argb << 8);
-      *(uint16_t*)(&row_buf[sx * 2])     = doubled;
-      row_opaque[sx * 2]     = opaque;
-      row_opaque[sx * 2 + 1] = opaque;
-    }
-
-    for (int dy = 0; dy < scale; dy++) {
-      int fb_y = fb_bounds.size.h/2 - dest_y - draw_h + y + dy + 2 + g_shake_offset.y;
-      if (fb_y < 0 || fb_y >= fb_bounds.size.h) continue;
-      GBitmapDataRowInfo info = gbitmap_get_data_row_info(fb, fb_y);
-      if (info.min_x > info.max_x) continue;
-
-      int copy_start = MAX(0, info.min_x - fb_x_start);
-      int copy_end   = MIN(draw_w, info.max_x - fb_x_start + 1);
-      if (copy_start >= copy_end) continue;
-
-      for (int x = copy_start; x < copy_end; x++) {
-        if (row_opaque[x])
-          info.data[fb_x_start + x] = row_buf[x];
-      }
-    }
-  }
+  (void)ctx;
+  blit_core(fb, src_x, src_y, src_w, src_h, dest_x, dest_y, scale, false, true);
 }
 
 void blit_scaled_fliphv(GBitmap *fb, GContext *ctx,
                               int src_x, int src_y, int src_w, int src_h,
                               int dest_x, int dest_y, int scale) {
-  int draw_w = src_w * scale;
-  int draw_h = src_h * scale;
-
-  uint8_t      *atlas_data   = gbitmap_get_data(s_atlas);
-  int           atlas_stride = gbitmap_get_bytes_per_row(s_atlas);
-  GColor       *palette      = gbitmap_get_palette(s_atlas);
-
-  GRect    fb_bounds = gbitmap_get_bounds(fb);
-  //const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x;
-  const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x + g_shake_offset.x;
-
-  uint8_t row_buf[draw_w];
-  bool    row_opaque[draw_w];
-
-  for (int y = 0; y < draw_h; y += scale) {
-    int map_y = src_y + (src_h - 1 - (y / scale));
-    for (int sx = 0; sx < src_w; sx++) {
-      int map_x = src_x + (src_w - 1 - sx);
-      GColor col = sample_atlas(atlas_data, atlas_stride, palette, map_x, map_y);
-      uint8_t argb = col.argb;  // no sentinel, take value as-is
-      bool    opaque = (col.a != 0);
-      uint16_t doubled = (uint16_t)argb | ((uint16_t)argb << 8);
-      *(uint16_t*)(&row_buf[sx * 2])     = doubled;
-      row_opaque[sx * 2]     = opaque;
-      row_opaque[sx * 2 + 1] = opaque;
-    }
-
-    for (int dy = 0; dy < scale; dy++) {
-      int fb_y = fb_bounds.size.h/2 - dest_y - draw_h + y + dy + 2 + g_shake_offset.y;
-      if (fb_y < 0 || fb_y >= fb_bounds.size.h) continue;
-      GBitmapDataRowInfo info = gbitmap_get_data_row_info(fb, fb_y);
-      if (info.min_x > info.max_x) continue;
-
-      int copy_start = MAX(0, info.min_x - fb_x_start);
-      int copy_end   = MIN(draw_w, info.max_x - fb_x_start + 1);
-      if (copy_start >= copy_end) continue;
-
-      for (int x = copy_start; x < copy_end; x++) {
-        if (row_opaque[x])
-          info.data[fb_x_start + x] = row_buf[x];
-      }
-    }
-  }
+  (void)ctx;
+  blit_core(fb, src_x, src_y, src_w, src_h, dest_x, dest_y, scale, true, true);
 }
-
 
 void blit_scaled_flipped(GBitmap *fb, GContext *ctx,
                                 int src_x, int src_y, int src_w, int src_h,
                                 int dest_x, int dest_y, int scale) {
-  int draw_w = src_w * scale;
-  int draw_h = src_h * scale;
-
-  uint8_t *atlas_data   = gbitmap_get_data(s_atlas);
-  int      atlas_stride = gbitmap_get_bytes_per_row(s_atlas);
-  GColor  *palette      = gbitmap_get_palette(s_atlas);
-
-  GRect fb_bounds = gbitmap_get_bounds(fb);
-
-  //const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x;
-  const int fb_x_start = fb_bounds.size.w / 2 - 130 + dest_x + g_shake_offset.x;
-
-  uint8_t row_buf[draw_w];
-  bool    row_opaque[draw_w];
-
-  for (int y = 0; y < draw_h; y += scale) {
-    int map_y = src_y + (y / scale);
-    for (int sx = 0; sx < src_w; sx++) {
-      int map_x = src_x + (src_w - 1 - sx);
-      GColor col = sample_atlas(atlas_data, atlas_stride, palette, map_x, map_y);
-      uint8_t argb = col.argb;  // no sentinel, take value as-is
-      bool    opaque = (col.a != 0);
-      uint16_t doubled = (uint16_t)argb | ((uint16_t)argb << 8);
-      *(uint16_t*)(&row_buf[sx * 2])     = doubled;
-      row_opaque[sx * 2]     = opaque;
-      row_opaque[sx * 2 + 1] = opaque;
-    }
-
-    for (int dy = 0; dy < scale; dy++) {
-      //int fb_y = fb_bounds.size.h / 2 + dest_y + y + dy;
-      int fb_y = fb_bounds.size.h / 2 + dest_y + y + dy + g_shake_offset.y;
-      if (fb_y < 0 || fb_y >= fb_bounds.size.h) continue;
-      GBitmapDataRowInfo info = gbitmap_get_data_row_info(fb, fb_y);
-      if (info.min_x > info.max_x) continue;
-
-      int copy_start = MAX(0, info.min_x - fb_x_start);
-      int copy_end   = MIN(draw_w, info.max_x - fb_x_start + 1);
-      if (copy_start >= copy_end) continue;
-
-      for (int x = copy_start; x < copy_end; x++) {
-        if (row_opaque[x])
-          info.data[fb_x_start + x] = row_buf[x];
-      }
-    }
-  }
+  (void)ctx;
+  blit_core(fb, src_x, src_y, src_w, src_h, dest_x, dest_y, scale, true, false);
 }
 
   
@@ -477,7 +385,7 @@ static void up_click(ClickRecognizerRef recognizer, void *ctx) {
     if (dialog_is_open()) { dialog_input_prev(); return; }
     if (menu_is_open())   { menu_input_up();     return; }
     if (shop_is_open())   { shop_input_up();     return; }
-    if (minimap_is_open()) { minimap_close(); return; }
+    if (minimap_is_open()) { minimap_input_up(); return; }
     
     int dx = 0, dy = 0;
     if      (g_player.facing == FACING_NORTH) dy = -1;
@@ -559,23 +467,16 @@ static void down_click(ClickRecognizerRef recognizer, void *ctx) {
     if (shop_is_open())   { shop_input_down();   return; }
     if (minimap_is_open()) { minimap_close(); return; }
 
-    // // Move backward
-    // int dx = 0, dy = 0;
-    // if      (g_player.facing == FACING_NORTH) dy =  1;
-    // else if (g_player.facing == FACING_EAST)  dx = -1;
-    // else if (g_player.facing == FACING_SOUTH) dy = -1;
-    // else if (g_player.facing == FACING_WEST)  dx =  1;
+    // Exploration: turn left (mirror of SELECT's turn right). The items
+    // menu moved to hold-DOWN.
+    g_player.facing = (g_player.facing + 3) % 4;
+    layer_mark_dirty(s_canvas);
+}
 
-    // int nx = g_player.x + dx;
-    // int ny = g_player.y + dy;
-
-    // if (map_is_walkable(nx, ny)) {
-    //     g_player.x = nx;
-    //     g_player.y = ny;
-    //     event_check_tile(nx, ny); 
-    //     layer_mark_dirty(s_canvas);
-    // }
-
+// Hold DOWN opens the items/stats menu during exploration.
+static void down_long_click(ClickRecognizerRef recognizer, void *ctx) {
+    if (title_is_active() || combat_is_active() || dialog_is_open() ||
+        menu_is_open()    || shop_is_open()     || minimap_is_open()) return;
     menu_open();
 }
 
@@ -618,8 +519,9 @@ static void click_config_provider(void *ctx) {
     window_single_click_subscribe(BUTTON_ID_DOWN,   down_click);
     window_single_click_subscribe(BUTTON_ID_SELECT, select_click);
     window_single_click_subscribe(BUTTON_ID_BACK,   back_click);
-    // Hold SELECT to open the auto-map.
+    // Hold SELECT to open the auto-map; hold DOWN to open the items menu.
     window_long_click_subscribe(BUTTON_ID_SELECT, 400, select_long_click, NULL);
+    window_long_click_subscribe(BUTTON_ID_DOWN,   400, down_long_click,   NULL);
 }
 
 void touch_handle(int x, int y) {
@@ -692,12 +594,16 @@ void touch_handle(int x, int y) {
                 int ix = combat_icon_zone_x(i);
                 int dx = x - ix, dy = y - iy;
                 if (dx*dx + dy*dy < ir*ir) {
-                    // map icon index to action
-                    // 0=attack, 1=potion(if owned), last=run
-                    if (i == 0)            combat_input_attack();
-                    else if (i == count-1) combat_input_run();
-                    else if (g_player.spellbook >= SPELL_HEAL) combat_input_spell();
-                    else                   combat_input_item(0);
+                    // Icons: [Attack] [Spell|Potion?] [Run?]
+                    // When can_run is false, the last icon is spell/potion —
+                    // never treat it as Run (boss fights).
+                    if (i == 0) {
+                        combat_input_attack();
+                    } else if (combat_can_run() && i == count - 1) {
+                        combat_input_run();
+                    } else {
+                        combat_input_spell();  // routes to potion via down_mode
+                    }
                     return;
                 }
             }
@@ -740,7 +646,6 @@ static void window_load(Window *window) {
     s_atlas  = gbitmap_create_with_resource(RESOURCE_ID_ATLAS);
     s_bitfont = gbitmap_create_with_resource(RESOURCE_ID_BITFONT);  // add this
     s_icon_atlas = gbitmap_create_with_resource(RESOURCE_ID_ICONS);
-    s_monsters = gbitmap_create_with_resource(RESOURCE_ID_MONSTERS);
     s_canvas = layer_create(bounds);
     layer_set_update_proc(s_canvas, canvas_update_proc);
     layer_add_child(root, s_canvas);
@@ -777,7 +682,7 @@ static void window_unload(Window *window) {
     gbitmap_destroy(s_atlas); s_atlas  = NULL;
     gbitmap_destroy(s_bitfont); s_bitfont = NULL;  // add this
     gbitmap_destroy(s_icon_atlas); s_icon_atlas = NULL;
-    gbitmap_destroy(s_monsters); s_monsters = NULL;
+    monster_bitmap_unload();
     
     #if defined(PBL_TOUCH)
         touch_service_unsubscribe();

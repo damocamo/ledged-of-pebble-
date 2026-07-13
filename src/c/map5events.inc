@@ -20,7 +20,7 @@ static const EventCmd s_m5_ev0_cmds[] = {
 };
 static const EventCmd s_m5_ev1_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "DESCENDING...", 20 } },
-    { .type=CMD_CHANGE_MAP, .change_map={ 5, 1, 1, 1 } },
+    { .type=CMD_CHANGE_MAP, .change_map={ 5, 1, 1, 2 } },
 };
 static const EventCmd s_m5_ev2_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "YOU FALL!", 20 } },

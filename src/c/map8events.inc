@@ -20,37 +20,31 @@ static const EventCmd s_m8_ev0_cmds[] = {
 };
 static const EventCmd s_m8_ev1_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "DESCENDING...", 20 } },
-    { .type=CMD_CHANGE_MAP, .change_map={ 8, 1, 1, 1 } },
+    { .type=CMD_CHANGE_MAP, .change_map={ 8, 1, 1, 2 } },
 };
 static const EventCmd s_m8_ev2_cmds[] = {
     { .type=CMD_DISPLAY_MESSAGE, .message={ "BLINK!", 15 } },
-    { .type=CMD_MOVE_PLAYER, .move_player={ 20, 5, 1 } },
+    { .type=CMD_MOVE_PLAYER, .move_player={ 11, 5, 1 } },
 };
 static const EventCmd s_m8_ev3_cmds[] = {
-    { .type=CMD_DISPLAY_MESSAGE, .message={ "YOU FALL!", 20 } },
-    { .type=CMD_SHAKE, .shake={ 8, 4 } },
-    { .type=CMD_DAMAGE, .damage={ 8 } },
-    { .type=CMD_MOVE_PLAYER, .move_player={ 1, 1, 1 } },
-};
-static const EventCmd s_m8_ev4_cmds[] = {
     { .type=CMD_FLAG_CHECK, .flag_check={ 14, -1 } },
     { .type=CMD_FLAG_CHANGE, .flag_change={ 14, true } },
     { .type=CMD_GRANT_BONUS, .grant_bonus={ 3, 1 } },
     { .type=CMD_DISPLAY_ICON, .display_icon={ 15, 25 } },
     { .type=CMD_DISPLAY_MESSAGE, .message={ "DEF +1", 25 } },
-    { .type=CMD_CHANGE_DECOR, .change_decor={ 8, 3, DECOR_NONE } },
+    { .type=CMD_CHANGE_DECOR, .change_decor={ 15, 11, DECOR_NONE } },
 };
-static const EventCmd s_m8_ev5_cmds[] = {
+static const EventCmd s_m8_ev4_cmds[] = {
     { .type=CMD_FLAG_CHANGE, .flag_change={ 15, true } },
-    { .type=CMD_CHANGE_DECOR, .change_decor={ 6, 3, DECOR_NONE } },
+    { .type=CMD_CHANGE_DECOR, .change_decor={ 13, 1, DECOR_NONE } },
     { .type=CMD_DISPLAY_MESSAGE, .message={ "MIMIC DOWN!", 25 } },
 };
-static const EventCmd s_m8_ev6_cmds[] = {
+static const EventCmd s_m8_ev5_cmds[] = {
     { .type=CMD_FLAG_CHECK, .flag_check={ 15, -1 } },
     { .type=CMD_DISPLAY_MESSAGE, .message={ "IT BITES!", 18 } },
-    { .type=CMD_BATTLE, .battle={ ENEMY_GOLEM, 5, true } },
+    { .type=CMD_BATTLE, .battle={ ENEMY_GOLEM, 4, true } },
 };
-static const EventCmd s_m8_ev7_cmds[] = {
+static const EventCmd s_m8_ev6_cmds[] = {
     { .type=CMD_DIALOG, .dialog={ &s_m8_note0_dialog } },
 };
 
@@ -59,10 +53,9 @@ const Event MAP8_EVENT_TABLE[] = {
     { s_m8_ev1_cmds, ARRAY_LENGTH(s_m8_ev1_cmds), EVENT_TRIGGER_STEP },
     { s_m8_ev2_cmds, ARRAY_LENGTH(s_m8_ev2_cmds), EVENT_TRIGGER_STEP },
     { s_m8_ev3_cmds, ARRAY_LENGTH(s_m8_ev3_cmds), EVENT_TRIGGER_STEP },
-    { s_m8_ev4_cmds, ARRAY_LENGTH(s_m8_ev4_cmds), EVENT_TRIGGER_STEP },
-    { s_m8_ev5_cmds, ARRAY_LENGTH(s_m8_ev5_cmds), NO_EVENT_TRIGGER },
-    { s_m8_ev6_cmds, ARRAY_LENGTH(s_m8_ev6_cmds), EVENT_TRIGGER_STEP },
-    { s_m8_ev7_cmds, ARRAY_LENGTH(s_m8_ev7_cmds), EVENT_TRIGGER_FORWARD },
+    { s_m8_ev4_cmds, ARRAY_LENGTH(s_m8_ev4_cmds), NO_EVENT_TRIGGER },
+    { s_m8_ev5_cmds, ARRAY_LENGTH(s_m8_ev5_cmds), EVENT_TRIGGER_STEP },
+    { s_m8_ev6_cmds, ARRAY_LENGTH(s_m8_ev6_cmds), EVENT_TRIGGER_FORWARD },
 };
 #define MAP8_EVENT_COUNT ARRAY_LENGTH(MAP8_EVENT_TABLE)
 #define MAP8_START_EVENT 0

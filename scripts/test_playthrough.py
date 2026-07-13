@@ -24,13 +24,13 @@ ENEMIES = {
     0: dict(name="GLITCH RAT", hp=6, atk=(1, 4), cat="beast", gold=(1, 2), powers=["atk"]),
     1: dict(name="PIXEL BAT", hp=7, atk=(2, 4), cat="beast", gold=(1, 3), powers=["atk", "hpdrain"]),
     2: dict(name="RIFT GUARD", hp=11, atk=(3, 7), cat="demon", gold=(2, 5), powers=["atk", "scorch"]),
-    3: dict(name="THE KEEPER", hp=28, atk=(4, 9), cat="demon", gold=(20, 30), powers=["atk", "scorch", "shield"]),
+    3: dict(name="THE KEEPER", hp=32, atk=(5, 10), cat="demon", gold=(20, 30), powers=["atk", "scorch", "shield"]),
     4: dict(name="CLOCKBONE", hp=15, atk=(4, 8), cat="undead", gold=(3, 6), powers=["atk"]),
     5: dict(name="GEAR SPIDER", hp=17, atk=(4, 9), cat="beast", gold=(4, 8), powers=["atk", "scorch"]),
     6: dict(name="STATIC", hp=21, atk=(6, 11), cat="undead", gold=(6, 12), powers=["atk", "hpdrain", "mpdrain"]),
     7: dict(name="QUARTZ GOLEM", hp=32, atk=(7, 13), cat="automaton", gold=(8, 15), powers=["atk", "scorch"]),
     8: dict(name="RIFT OGRE", hp=36, atk=(8, 15), cat="demon", gold=(10, 20), powers=["atk", "scorch"]),
-    9: dict(name="THE ARCHITECT", hp=40, atk=(6, 12), cat="undead", gold=(40, 60), powers=["atk", "scorch", "mpdrain", "shield"]),
+    9: dict(name="THE ARCHITECT", hp=55, atk=(7, 14), cat="undead", gold=(40, 60), powers=["atk", "scorch", "mpdrain", "shield"]),
 }
 
 WEAPON_ATK = {0: 0, 1: 2, 2: 4, 3: 6}

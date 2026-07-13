@@ -35,8 +35,98 @@
                     "type": "bitmap"
                 },
                 {
-                    "file": "images/monsters.png",
-                    "name": "MONSTERS",
+                    "file": "images/monster_00.png",
+                    "name": "MONSTER_0",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_01.png",
+                    "name": "MONSTER_1",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_02.png",
+                    "name": "MONSTER_2",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_03.png",
+                    "name": "MONSTER_3",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_04.png",
+                    "name": "MONSTER_4",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_05.png",
+                    "name": "MONSTER_5",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_06.png",
+                    "name": "MONSTER_6",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_07.png",
+                    "name": "MONSTER_7",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_08.png",
+                    "name": "MONSTER_8",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_09.png",
+                    "name": "MONSTER_9",
+                    "targetPlatforms": [
+                        "emery",
+                        "gabbro"
+                    ],
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/monster_10.png",
+                    "name": "MONSTER_10",
                     "targetPlatforms": [
                         "emery",
                         "gabbro"
@@ -55,5 +145,5 @@
             "watchface": false
         }
     },
-    "version": "1.2.1"
+    "version": "1.3.0"
 }
