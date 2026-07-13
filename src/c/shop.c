@@ -59,17 +59,19 @@ static char      s_status[16] = "";
 static int       s_gossip_page = 0;
 
 extern GBitmap *s_monsters;
+void monster_bitmap_load(int slot);   // main.c — loads one 58x63 slice
+void monster_bitmap_unload(void);
 
 // Per-floor merchant gossip (2 lines each, cycled on open).
 static const char *const s_gossip[][2] = {
     /* map 0 unused */ { "", "" },
-    /* map 1 (L2) */ { "MAREN LEFT", "THIS NOTE." },
+    /* map 1 (L2) */ { "BUY MAP TO", "REVEAL FLOOR." },
     /* map 2 */      { "WATCH THE", "STATIC." },
     /* map 3 */      { "GEMS HIDE", "IN CHESTS." },
     /* map 4 (L5) */ { "THE KEEPER", "WAITS AHEAD." },
     /* map 5 */      { "PURGE THE", "SIGNAL PILES." },
     /* map 6 (L7) */ { "DECODE OPENS", "LOCKED DOORS." },
-    /* map 7 */      { "STAY SHARP.", "GO DEEPER." },
+    /* map 7 */      { "BUY MAP TO", "REVEAL FLOOR." },
     /* map 8 */      { "THE CORE", "HUMS LOUD." },
     /* map 9 (L10)*/ { "THE ARCHITECT", "BUILT THIS." },
 };
@@ -154,7 +156,7 @@ static void draw_merchant_portrait(GBitmap *fb, int dest_x, int dest_y) {
     int stride = gbitmap_get_bytes_per_row(s_monsters);
     GColor *palette = gbitmap_get_palette(s_monsters);
     GRect fb_bounds = gbitmap_get_bounds(fb);
-    int sprite_x = MERCHANT_SLOT * MERCHANT_W;
+    int sprite_x = 0;  // s_monsters holds just the merchant slice
     const int scale = 2;
 
     for (int row = 0; row < MERCHANT_H; row++) {
@@ -186,6 +188,7 @@ void shop_init(Layer *canvas, GBitmap *icon_atlas) {
 bool shop_is_open(void) { return s_open; }
 
 void shop_open(void) {
+    monster_bitmap_load(MERCHANT_SLOT);
     s_open = true;
     s_selected = 0;
     s_scroll = 0;
@@ -195,6 +198,7 @@ void shop_open(void) {
 }
 
 void shop_close(void) {
+    monster_bitmap_unload();
     s_open = false;
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 }
@@ -281,17 +285,20 @@ void shop_input_select(void) {
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
 }
 
+// Shop text renders at scale 2 (16px lines): scale-3 titles, gossip, and
+// item names overflowed the 200px screen and collided with each other.
+#define SHOP_TEXT_SCALE 2
+#define SHOP_LH         (8 * SHOP_TEXT_SCALE + 3)
+
 void shop_draw(GBitmap *fb) {
     if (!s_open) return;
 
     GRect bounds = gbitmap_get_bounds(fb);
     int cx = bounds.size.w / 2;
 
-    bitfont_render(fb, "MERCHANT", cx, 4, JUSTIFY_CENTER);
-
-    static char gold_buf[20];
-    snprintf(gold_buf, sizeof(gold_buf), "GOLD %d", player_get_gold());
-    bitfont_render(fb, gold_buf, cx, 26, JUSTIFY_CENTER);
+    static char line[24];
+    snprintf(line, sizeof(line), "MERCHANT - %dG", player_get_gold());
+    bitfont_render_scaled(fb, line, cx, 4, JUSTIFY_CENTERV, SHOP_TEXT_SCALE);
 
     // Gossip line under title
     int mid = g_player.map_id;
@@ -299,20 +306,23 @@ void shop_draw(GBitmap *fb) {
     if (mid > 9) mid = 9;
     const char *gline = s_gossip[mid][s_gossip_page & 1];
     if (gline && gline[0]) {
-        bitfont_render(fb, gline, cx, 40, JUSTIFY_CENTER);
+        bitfont_render_scaled(fb, gline, cx, 4 + SHOP_LH,
+                              JUSTIFY_CENTERV, SHOP_TEXT_SCALE);
     }
 
-    draw_merchant_portrait(fb, 8, 58);
+    draw_merchant_portrait(fb, 4, 64);
 
     int n = visible_count();
     if (n == 0) {
-        bitfont_render(fb, "NOTHING LEFT", cx + 40, 100, JUSTIFY_CENTER);
-        bitfont_render(fb, "BK: EXIT", cx, bounds.size.h - 26, JUSTIFY_CENTER);
+        bitfont_render_scaled(fb, "NOTHING LEFT", bounds.size.w - 4, 100,
+                              JUSTIFY_RIGHT, SHOP_TEXT_SCALE);
+        bitfont_render_scaled(fb, "BK:EXIT", cx, bounds.size.h - SHOP_LH - 4,
+                              JUSTIFY_CENTERV, SHOP_TEXT_SCALE);
         return;
     }
 
-    int list_top = 58;
-    int icon_x = cx + 20;
+    int list_top = 64;
+    int icon_x = cx + 24;
 
     for (int vis = 0; vis < SHOP_VISIBLE; vis++) {
         int row = s_scroll + vis;
@@ -325,21 +335,36 @@ void shop_draw(GBitmap *fb) {
 
         draw_icon(fb, it->icon_slot, icon_x, row_y);
         if (selected) {
-            bitfont_render(fb, ">", icon_x - 16, row_y + 10, JUSTIFY_LEFT);
-            static char line[28];
-            snprintf(line, sizeof(line), "%s", it->name);
-            bitfont_render(fb, line, cx + 40, list_top - 14, JUSTIFY_CENTER);
-            snprintf(line, sizeof(line), "%dG", (int)it->price);
-            bitfont_render(fb, line, icon_x + SHOP_ICON_DRAW + 2, row_y + 12, JUSTIFY_LEFT);
+            bitfont_render_scaled(fb, ">", icon_x - 16,
+                                  row_y + SHOP_ICON_DRAW / 2 - 8,
+                                  JUSTIFY_LEFT, SHOP_TEXT_SCALE);
+            // Selected line: clarify upgrades / map reveal
+            if (it->kind == SHOP_MAP) {
+                snprintf(line, sizeof(line), "MAP FULL %dG", (int)it->price);
+            } else if (it->kind == SHOP_WEAPON || it->kind == SHOP_ARMOR) {
+                snprintf(line, sizeof(line), "%s UP %dG",
+                         it->name, (int)it->price);
+            } else {
+                snprintf(line, sizeof(line), "%s %dG",
+                         it->name, (int)it->price);
+            }
+            bitfont_render_scaled(fb, line, cx, list_top - SHOP_LH,
+                                  JUSTIFY_CENTERV, SHOP_TEXT_SCALE);
         } else {
             static char price[12];
             snprintf(price, sizeof(price), "%d", (int)it->price);
-            bitfont_render(fb, price, icon_x + SHOP_ICON_DRAW + 2, row_y + 12, JUSTIFY_LEFT);
+            bitfont_render_scaled(fb, price, icon_x + SHOP_ICON_DRAW + 2,
+                                  row_y + SHOP_ICON_DRAW / 2 - 8,
+                                  JUSTIFY_LEFT, SHOP_TEXT_SCALE);
         }
     }
 
     if (s_status[0]) {
-        bitfont_render(fb, s_status, cx, bounds.size.h - 48, JUSTIFY_CENTER);
+        bitfont_render_scaled(fb, s_status, cx,
+                              bounds.size.h - SHOP_LH * 2 - 6,
+                              JUSTIFY_CENTERV, SHOP_TEXT_SCALE);
     }
-    bitfont_render(fb, "SL:BUY BK:EXIT", cx, bounds.size.h - 26, JUSTIFY_CENTER);
+    bitfont_render_scaled(fb, "SL:BUY BK:EXIT", cx,
+                          bounds.size.h - SHOP_LH - 4,
+                          JUSTIFY_CENTERV, SHOP_TEXT_SCALE);
 }

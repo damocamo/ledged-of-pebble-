@@ -485,6 +485,9 @@ def main():
     # Explicit transparency=0 so pebble resource pack marks palette[0] as alpha=0.
     out.save(OUT, transparency=0)
     print(f"Wrote {OUT} ({out.size[0]}x{out.size[1]}, {len(grids)} sprites, transparency=0)")
+    # The app loads per-monster slices, not the sheet — keep them in sync.
+    import split_monsters
+    split_monsters.main()
 
 
 if __name__ == "__main__":

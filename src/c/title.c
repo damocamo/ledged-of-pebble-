@@ -121,17 +121,17 @@ void title_input_select(void) {
         s_active = false;
 
     } else if (strcmp(item, "CONTINUE") == 0) {
-        // load will be implemented next
-        // for now just start fresh if no load system yet
         map_init_for(0);
         event_load_map(0);
         encounter_init(0);
         player_init();
-        if (!save_read()) { // then overwrite with save data
-            // save was corrupt — fall back to new game
+        if (!save_read()) {
+            // Corrupt / missing save — fall back to a fresh start + intro.
             save_delete();
+            start_event_run();
         }
-        start_event_run();
+        // Successful Continue: skip start_event_run so intros / LEVEL toasts
+        // do not replay every resume.
         s_active = false;
     }
 

@@ -349,10 +349,10 @@ static void cmd_set_fail_event(const EventCmd *cmd) {
 }
 
 static void message_timer_cb(void *context) {
+    (void)context;
     s_message_active = false;
-    s_icon_timer = false;
     s_message_timer  = NULL;
-    // trigger a redraw so the message clears
+    // Do not touch s_icon_timer here — icon has its own callback.
     if (s_canvas_ref) {
         layer_mark_dirty(s_canvas_ref);
     }
@@ -403,6 +403,7 @@ static void cmd_set_respawn(const EventCmd *cmd) {
 static void cmd_damage(const EventCmd *cmd) {
     player_take_damage(cmd->damage.amount);
     if (player_is_dead()) {
+        player_death_tax();
         player_respawn();
     }
     if (s_canvas_ref) layer_mark_dirty(s_canvas_ref);
@@ -590,10 +591,6 @@ void flags_clear(void) {
 }
 
 static int cmd_flag_check(const EventCmd *cmd) {
-    int flag_id = cmd->flag_check.flag_id;
-    bool flag_value = flag_get(flag_id);
-    int jump_event = cmd->flag_check.jump_event;
-    
     if (flag_get(cmd->flag_check.flag_id)) {
         return cmd->flag_check.jump_event;  // flag is set — jump or stop
     }

@@ -148,7 +148,7 @@ void dialog_draw(GBitmap *fb) {
     }
 
     // Page indicator
-    static char page_buf[8];
+    static char page_buf[24];
     snprintf(page_buf, sizeof(page_buf), "%d/%d",
              s_page + 1, s_dialog->page_count);
     bitfont_render(fb, page_buf, cx-100+3, cy + 114 - 27*2, JUSTIFY_LEFT);

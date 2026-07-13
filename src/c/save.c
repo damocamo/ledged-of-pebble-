@@ -199,21 +199,8 @@ void save_flush_map_deltas(uint8_t map_id) {
     
     s_current_deltas.map_id = map_id;
 
-    //APP_LOG(APP_LOG_LEVEL_INFO, "=== Flushing Map %d Deltas ===", map_id);
-    //APP_LOG(APP_LOG_LEVEL_INFO, "Tile deltas: %d", s_current_deltas.tile_delta_count);
-    //APP_LOG(APP_LOG_LEVEL_INFO, "Decor deltas: %d", s_current_deltas.decor_delta_count);
-    
-    for (int i = 0; i < s_current_deltas.tile_delta_count; i++) {
-        TileDelta *td = &s_current_deltas.tile_deltas[i];
-        //APP_LOG(APP_LOG_LEVEL_INFO, "  Tile (%d,%d) = %d", td->x, td->y, td->tile_type);
-    }
-    
-    for (int i = 0; i < s_current_deltas.decor_delta_count; i++) {
-        DecorDelta *dd = &s_current_deltas.decor_deltas[i];
-        //APP_LOG(APP_LOG_LEVEL_INFO, "  Decor (%d,%d) = %d", dd->x, dd->y, dd->decor_type);
-    }
-    
     int written = persist_write_data(key, &s_current_deltas, sizeof(MapDeltaData));
+    (void)written;
     //APP_LOG(APP_LOG_LEVEL_INFO, "Wrote %d bytes to persist key %d", sizeof(MapDeltaData), key);
     
     // Clear deltas after flushing
@@ -232,11 +219,18 @@ void save_load_map_deltas(uint8_t map_id) {
     s_current_deltas.map_id = map_id;
     
     int read = persist_read_data(key, &s_current_deltas, sizeof(MapDeltaData));
-    
+    (void)read;
+
     if (!persist_exists(key)) {
         //APP_LOG(APP_LOG_LEVEL_INFO, "No deltas found for map %d (key %d)", map_id, key);
         return;
     }
+
+    // Clamp counts — stale/corrupt persist data must never index past the arrays.
+    if (s_current_deltas.tile_delta_count > SAVE_MAX_TILE_DELTAS)
+        s_current_deltas.tile_delta_count = SAVE_MAX_TILE_DELTAS;
+    if (s_current_deltas.decor_delta_count > SAVE_MAX_DELTAS)
+        s_current_deltas.decor_delta_count = SAVE_MAX_DELTAS;
     
     //APP_LOG(APP_LOG_LEVEL_INFO, "=== Loading Map %d Deltas ===", map_id);
     //APP_LOG(APP_LOG_LEVEL_INFO, "Tile deltas: %d", s_current_deltas.tile_delta_count);
