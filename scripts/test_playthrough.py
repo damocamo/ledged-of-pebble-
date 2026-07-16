@@ -184,6 +184,8 @@ class Player:
     bonus_def: int = 0
     potions: int = 0
     keys: int = 0
+    rest_items: int = 0   # carried SIGNAL REST (max 1)
+    map_items: int = 0    # carried MAP REVEAL (max 1)
     dex: int = 5
     map_id: int = 0
     x: int = 0
@@ -444,6 +446,7 @@ def shop_buy(p: Player, what: str) -> bool:
         "purge": (40, "spell", 2),
         "decode": (80, "spell", 3),
         "rest": (10, "rest", None),
+        "map": (10, "map", None),
     }
     if what not in prices:
         return False
@@ -456,6 +459,11 @@ def shop_buy(p: Player, what: str) -> bool:
     if kind == "spell":
         if p.spellbook >= val or p.spellbook + 1 != val:
             return False
+    # carry limit: one map / one rest at a time (merchant refuses a second)
+    if kind == "rest" and p.rest_items >= 1:
+        return False
+    if kind == "map" and p.map_items >= 1:
+        return False
     if p.gold < price:
         return False
     p.gold -= price
@@ -468,8 +476,20 @@ def shop_buy(p: Player, what: str) -> bool:
     elif kind == "spell":
         p.spellbook = val
     elif kind == "rest":
-        p.rest()
+        p.rest_items += 1   # packed, used later from inventory
+    elif kind == "map":
+        p.map_items += 1
     note(f"shop bought {what} ({price}G) gold={p.gold}")
+    return True
+
+
+def use_rest_item(p: Player) -> bool:
+    """Use a carried SIGNAL REST from inventory (any floor)."""
+    if p.rest_items < 1:
+        return False
+    p.rest_items -= 1
+    p.rest()
+    note(f"used SIGNAL REST on map {p.map_id} → full HP/MP + respawn")
     return True
 
 
@@ -574,6 +594,9 @@ def play_level(p: Player, level: int) -> bool:
                         for item in ("stick", "dagger", "spike", "cloak", "vest",
                                     "plate", "signal", "purge", "decode", "potion", "rest"):
                             shop_buy(p, item)
+                # Carried SIGNAL REST: bought on any earlier floor, used here
+                if p.hp < p.max_hp and p.rest_items > 0:
+                    use_rest_item(p)
                 if p.spellbook >= 1 and p.hp < p.max_hp:
                     while p.mp > 0 and p.hp < p.max_hp:
                         if not magic_heal(p):
@@ -845,12 +868,55 @@ def test_potion_vs_spell_combat():
         err("BUG: combat still hides potions once spellbook>=1")
 
 
+def test_carry_items():
+    """MAP REVEAL / SIGNAL REST: carried items, one each, used from the menu."""
+    shop = (SRC / "shop.c").read_text()
+    menu = (SRC / "menu.c").read_text()
+    menu_h = (SRC / "menu.h").read_text()
+
+    if ("player_give_item(ITEM_SLOT_MAP" in shop
+            and "player_give_item(ITEM_SLOT_REST" in shop
+            and "!player_has_item(ITEM_SLOT_MAP)" in shop
+            and "!player_has_item(ITEM_SLOT_REST)" in shop
+            and "minimap_reveal_all" not in shop):
+        pass_("shop packs MAP/REST into inventory (carry limit 1 each, no instant effect)")
+    else:
+        err("shop still applies MAP/REST instantly or lacks carry-1 gate")
+
+    if ("ITEM_TYPE_MAP" in menu_h and "ITEM_TYPE_REST" in menu_h
+            and "minimap_reveal_all(g_player.map_id)" in menu
+            and "player_set_respawn()" in menu):
+        pass_("menu uses MAP (reveal current floor) and REST (heal + respawn) items")
+    else:
+        err("menu missing MAP/REST use handlers")
+
+    # Behavioral: buy on one floor, use on another; second buy refused
+    p = Player(gold=50)
+    p.map_id = 4                       # bought at the L5 merchant
+    assert shop_buy(p, "rest") and shop_buy(p, "map")
+    if not shop_buy(p, "rest") and not shop_buy(p, "map"):
+        pass_("merchant refuses a second MAP/REST while one is carried")
+    else:
+        err("carry limit not enforced in sim")
+    p.map_id = 8                       # used on L9
+    p.hp = 3
+    if use_rest_item(p) and p.hp == p.max_hp and p.respawn_map == 8 and p.rest_items == 0:
+        pass_("SIGNAL REST bought on L5 works on L9 (full heal + respawn moved)")
+    else:
+        err("cross-floor rest use failed")
+    if shop_buy(p, "rest"):
+        pass_("after using REST the merchant sells another")
+    else:
+        err("cannot re-buy REST after using it")
+
+
 def main():
     print("=== Playthrough + systems tests ===\n")
 
     test_death_respawn_magic()
     test_stick_softlock()
     test_potion_vs_spell_combat()
+    test_carry_items()
 
     # Full campaign
     p = Player()

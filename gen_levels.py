@@ -822,7 +822,10 @@ def build_level(lvl):
         ]
         events[y][x] = add_event(cmds, "EVENT_TRIGGER_STEP")
 
-    # Mimic chests — ambush then clear
+    # Mimic chests — ambush then clear. Chest stays until victory so a
+    # successful RUN leaves the trap in place (no flee loophole). During
+    # combat, draw_decor skips the player's tile so the chest does not
+    # sit under the enemy sprite.
     for (x, y) in mimics:
         f = next_flag()
         victory = add_event([

@@ -6,7 +6,15 @@
 typedef enum {
     ITEM_TYPE_CONSUMABLE = 0,  // use and deplete quantity
     ITEM_TYPE_KEY        = 1,  // use triggers a map event
+    ITEM_TYPE_MAP        = 2,  // reveals the current floor, then depletes
+    ITEM_TYPE_REST       = 3,  // full heal + respawn point, then depletes
 } ItemType;
+
+// Inventory slot indices (player.inventory / s_items order).
+#define ITEM_SLOT_POTION 0
+#define ITEM_SLOT_KEY    1
+#define ITEM_SLOT_MAP    2
+#define ITEM_SLOT_REST   3
 
 typedef struct {
     const char *name;
