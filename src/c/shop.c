@@ -3,9 +3,9 @@
 #include "bitfont.h"
 #include "player.h"
 #include "event.h"
-#include "minimap.h"
 #include "map.h"
 #include "save.h"
+#include "menu.h"
 
 // Shared merchant stock + per-floor gossip. Armor/weapons one tier at a time.
 
@@ -14,8 +14,6 @@
 #define SHOP_ICON_DRAW  (SHOP_ICON_SIZE * SHOP_ICON_SCALE)
 #define SHOP_ROW_H      (SHOP_ICON_DRAW + 4)
 #define SHOP_VISIBLE     3
-
-#define FLAG_MAP_REVEAL_BASE 100  // + map_id
 
 typedef enum {
     SHOP_POTION = 0,
@@ -65,13 +63,13 @@ void monster_bitmap_unload(void);
 // Per-floor merchant gossip (2 lines each, cycled on open).
 static const char *const s_gossip[][2] = {
     /* map 0 unused */ { "", "" },
-    /* map 1 (L2) */ { "BUY MAP TO", "REVEAL FLOOR." },
+    /* map 1 (L2) */ { "MAPS WORK ON", "ANY FLOOR." },
     /* map 2 */      { "WATCH THE", "STATIC." },
     /* map 3 */      { "GEMS HIDE", "IN CHESTS." },
     /* map 4 (L5) */ { "THE KEEPER", "WAITS AHEAD." },
     /* map 5 */      { "PURGE THE", "SIGNAL PILES." },
     /* map 6 (L7) */ { "DECODE OPENS", "LOCKED DOORS." },
-    /* map 7 */      { "BUY MAP TO", "REVEAL FLOOR." },
+    /* map 7 */      { "REST WHERE", "YOU NEED IT." },
     /* map 8 */      { "THE CORE", "HUMS LOUD." },
     /* map 9 (L10)*/ { "THE ARCHITECT", "BUILT THIS." },
 };
@@ -80,15 +78,12 @@ static void set_status(const char *msg) {
     snprintf(s_status, sizeof(s_status), "%s", msg);
 }
 
-static bool map_reveal_bought(void) {
-    return flag_get((uint8_t)(FLAG_MAP_REVEAL_BASE + g_player.map_id));
-}
-
 static bool item_available(const ShopItem *it) {
     switch (it->kind) {
         case SHOP_POTION: return true;
-        case SHOP_MAP:    return !map_reveal_bought();
-        case SHOP_REST:   return true;
+        // Map / rest are carried items now: one of each at a time.
+        case SHOP_MAP:    return !player_has_item(ITEM_SLOT_MAP);
+        case SHOP_REST:   return !player_has_item(ITEM_SLOT_REST);
         case SHOP_ARMOR:  return g_player.armor + 1 == it->value;
         case SHOP_WEAPON: return g_player.weapon < it->value;  // any better tier (skip Stick OK)
         case SHOP_SPELL:
@@ -250,20 +245,19 @@ void shop_input_select(void) {
 
     switch (it->kind) {
         case SHOP_POTION:
-            player_give_item(0, 1);
+            player_give_item(ITEM_SLOT_POTION, 1);
             set_status("POTION +1");
             break;
         case SHOP_MAP:
-            minimap_reveal_all(g_player.map_id);
-            flag_set((uint8_t)(FLAG_MAP_REVEAL_BASE + g_player.map_id), true);
-            set_status("MAP REVEALED");
+            // Goes into the pack — use it from the menu on any floor.
+            player_give_item(ITEM_SLOT_MAP, 1);
+            set_status("MAP PACKED");
             if (s_selected >= visible_count() && s_selected > 0) s_selected--;
             break;
         case SHOP_REST:
-            g_player.hp = g_player.max_hp;
-            g_player.mp = g_player.max_mp;
-            player_set_respawn();
-            set_status("RESTORED");
+            player_give_item(ITEM_SLOT_REST, 1);
+            set_status("REST PACKED");
+            if (s_selected >= visible_count() && s_selected > 0) s_selected--;
             break;
         case SHOP_ARMOR:
             player_set_armor((ArmorId)it->value);
@@ -338,10 +332,8 @@ void shop_draw(GBitmap *fb) {
             bitfont_render_scaled(fb, ">", icon_x - 16,
                                   row_y + SHOP_ICON_DRAW / 2 - 8,
                                   JUSTIFY_LEFT, SHOP_TEXT_SCALE);
-            // Selected line: clarify upgrades / map reveal
-            if (it->kind == SHOP_MAP) {
-                snprintf(line, sizeof(line), "MAP FULL %dG", (int)it->price);
-            } else if (it->kind == SHOP_WEAPON || it->kind == SHOP_ARMOR) {
+            // Selected line: clarify upgrades
+            if (it->kind == SHOP_WEAPON || it->kind == SHOP_ARMOR) {
                 snprintf(line, sizeof(line), "%s UP %dG",
                          it->name, (int)it->price);
             } else {

@@ -6,7 +6,19 @@ You were checking the time. Then the watch pulled you through.
 
 Ten levels. Merchants. Grimrock-style puzzles. Find the way home.
 
-**1.2.1** (balance/RAM polish on the 1.2.0 feature set): Signal Magic (Heal / Purge / Decode), The Keeper mid-boss, weapons, and permanent chests.
+**1.3.2**: Signal Magic (Heal / Purge / Decode), The Keeper mid-boss, weapons, permanent chests, and carryable merchant supplies.
+
+## Merchant supplies
+
+MAP REVEAL and SIGNAL REST are carried items, not instant effects:
+
+- Buying one puts it in your pack. Open the inventory (hold DOWN) and
+  select it to use it — on **any floor**, whenever you like.
+- **MAP REVEAL** uncovers the whole floor you are standing on when used.
+- **SIGNAL REST** fully restores HP/MP and sets your respawn point to
+  where you used it.
+- You can carry **one map and one rest at a time**. Use it and the
+  merchants will sell you another.
 
 ## Credits
 

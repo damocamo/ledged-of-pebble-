@@ -5,6 +5,7 @@
 #include "event.h"
 #include "magic.h"
 #include "save.h"
+#include "minimap.h"
 
 
 // ---- Item registry ------------------------------------------------------
@@ -18,6 +19,8 @@ static int    s_owned_count = 0;
 static const ItemDef s_items[] = {
     { "HP POTION",     ITEM_TYPE_CONSUMABLE,  9,  -1, -1 },
     { "KEY",           ITEM_TYPE_KEY,        11,  -1, -1 },
+    { "MAP REVEAL",    ITEM_TYPE_MAP,         2,  -1, -1 },
+    { "SIGNAL REST",   ITEM_TYPE_REST,        3,  -1, -1 },
 };
 
 #define ITEM_COUNT ((int)ARRAY_LENGTH(s_items))
@@ -150,6 +153,21 @@ void menu_input_select(void) {
             }
             break;
         }
+        case ITEM_TYPE_MAP:
+            // Works on whatever floor you are standing on when used.
+            minimap_reveal_all(g_player.map_id);
+            player_take_item(item_idx, 1);
+            snprintf(g_magic_msg, sizeof(g_magic_msg), "FLOOR MAPPED");
+            save_write();
+            break;
+        case ITEM_TYPE_REST:
+            g_player.hp = g_player.max_hp;
+            g_player.mp = g_player.max_mp;
+            player_set_respawn();
+            player_take_item(item_idx, 1);
+            snprintf(g_magic_msg, sizeof(g_magic_msg), "RESTORED");
+            save_write();
+            break;
     }
 
     // rebuild list in case item was depleted

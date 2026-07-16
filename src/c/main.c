@@ -274,6 +274,13 @@ void draw_decor(GBitmap *fb, GContext *ctx, int slot, int map_x, int map_y) {
     if (map_x < 0 || map_x >= MAP_W) return;
     if (map_y < 0 || map_y >= MAP_H) return;
 
+    // During combat the dungeon still draws behind the enemy. Hide decor on
+    // the player's own tile so a mimic chest does not sit under the sprite
+    // (and appear to "follow" you). Flee leaves the chest in the world;
+    // victory events clear it for real.
+    if (combat_is_active() && map_x == g_player.x && map_y == g_player.y)
+        return;
+
     uint8_t decor_type = map_get_decor(map_x, map_y);  // bounds checked inside
     if (decor_type == DECOR_NONE) return;
     if (decor_type >= DECOR_TYPE_COUNT) return;
